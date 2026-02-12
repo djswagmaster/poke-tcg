@@ -1748,9 +1748,10 @@ function actionPlayPokemon(handIdx) {
 
 function renderItemAttachPrompt(handIdx, items) {
   const panel = document.getElementById('apActions');
+  const handRef = isOnline ? me().hand : cp().hand;
   let html = '<div class="ap-section-label" style="color:#a855f7">ATTACH A HELD ITEM?</div>';
-  items.forEach((item, i) => {
-    const realIdx = cp().hand.indexOf(item);
+  items.forEach((item) => {
+    const realIdx = handRef.indexOf(item);
     html += `<button class="ap-btn ap-btn-ability" onclick="finishPlayPokemon(${handIdx}, ${realIdx})">
       <span class="atk-name">${item.name}</span>
     </button>`;
@@ -2493,7 +2494,7 @@ function renderActionPanel() {
   allMine.forEach(target => {
     const isSlowStart = getPokemonData(target.name).ability?.key === 'slowStart' && !isPassiveBlocked();
     const cost = isSlowStart ? 2 : 1;
-    const canGrant = me.mana >= cost && target.energy < 5;
+    const canGrant = (isOnline ? (isMyTurn() && !G.pendingRetreat && !G.targeting) : true) && me.mana >= cost && target.energy < 5;
     html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${mePlayerNum}].${target === me.active ? 'active' : `bench[${me.bench.indexOf(target)}]`})" ${canGrant?'':'disabled'}>
       <span class="atk-name">+1 Energy → ${target.name}</span>
       <span class="atk-detail">${cost} mana${isSlowStart?' (Slow Start)':''} | ${target.energy}/5</span>
@@ -2735,6 +2736,7 @@ function handleServerMessage(msg) {
 
     case 'error':
       console.warn('Server error:', msg.message);
+      showTurnOverlay('Server error: ' + msg.message);
       break;
 
     case 'pong':
@@ -2885,8 +2887,14 @@ async function replayEvents(events) {
         break;
       }
       case 'retreat': {
+        // In online play, state is already updated to the post-retreat active.
+        // Animate a quick swap on the retreating side to match hotseat feel.
+        const sideField = event.player === myPlayerNum ? '#youField' : '#oppField';
+        animateEl(sideField + ' .active-slot', 'slide-out', 250);
+        await delay(250);
         renderBattle();
-        await delay(400);
+        animateEl(sideField + ' .active-slot', 'slide-in', 300);
+        await delay(350);
         break;
       }
       case 'play_pokemon': {
