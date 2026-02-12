@@ -2682,20 +2682,23 @@ function handleServerMessage(msg) {
       handleGameState(msg.state, msg.events || []);
       break;
 
-    case 'deckConfirmed':
-      updateLobbyStatus('Deck confirmed! Waiting for opponent...', 'ok');
+    case 'deckConfirmed': {
+      const btn = document.getElementById('dbConfirmBtn');
+      if (btn) { btn.textContent = 'Waiting for opponent...'; btn.className = 'db-confirm-btn disabled'; }
       break;
+    }
 
-    case 'oppDeckConfirmed':
-      updateLobbyStatus('Opponent\'s deck is ready!', 'ok');
+    case 'oppDeckConfirmed': {
+      const btn = document.getElementById('dbConfirmBtn');
+      if (btn && btn.textContent.includes('Waiting')) btn.textContent = 'Waiting for opponent... (they\'re ready!)';
       break;
+    }
 
     case 'setupConfirmed':
-      updateLobbyStatus('Setup confirmed! Waiting for opponent...', 'ok');
+      // showOnlineSetupScreen will show "waiting" on next gameState
       break;
 
     case 'oppSetupConfirmed':
-      updateLobbyStatus('Opponent is ready!', 'ok');
       break;
 
     case 'oppDisconnected':

@@ -1548,7 +1548,7 @@ function processDeckConfirm(G, playerNum, deck) {
     var card = deck[i];
     if (card.type === 'pokemon') {
       if (!getPokemonData(card.name)) return false;
-    } else if (card.type === 'item') {
+    } else if (card.type === 'items') {
       if (!getItemData(card.name)) return false;
     } else {
       return false;
