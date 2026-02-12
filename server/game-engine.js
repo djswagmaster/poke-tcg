@@ -1562,8 +1562,11 @@ function processDeckConfirm(G, playerNum, deck) {
   // Check if both players ready
   if (G.players[1].ready && G.players[2].ready) {
     G.phase = 'setupActive';
+    // Turn-based setup (multiplayer): player 1 selects first.
+    G.currentPlayer = 1;
     G.players[1].mana = 7;
     G.players[2].mana = 7;
+    // ready flags are not used for setup sequencing anymore, but keep them false.
     G.players[1].ready = false;
     G.players[2].ready = false;
     G.events.push({ type: 'phase_change', phase: 'setupActive' });
@@ -1573,7 +1576,11 @@ function processDeckConfirm(G, playerNum, deck) {
 
 function processSetupChoice(G, playerNum, choices) {
   var p = G.players[playerNum];
-  if (p.ready) return false;
+
+  // During setup, enforce strict turn order via G.currentPlayer.
+  if (G.phase === 'setupActive' || G.phase === 'setupBench') {
+    if (G.currentPlayer !== playerNum) return false;
+  }
 
   if (G.phase === 'setupActive') {
     if (!choices || choices.length !== 1) return false;
@@ -1590,12 +1597,12 @@ function processSetupChoice(G, playerNum, choices) {
     p.active = makePokemon(sel.name, sel.heldItem || null);
     p.hand = p.hand.filter(function(c) { return c.name !== sel.name; });
     if (sel.heldItem) p.hand = p.hand.filter(function(c) { return c.name !== sel.heldItem; });
-    p.ready = true;
-
-    if (G.players[1].ready && G.players[2].ready) {
+    // Advance turn: P1 -> P2, then phase change to setupBench.
+    if (playerNum === 1) {
+      G.currentPlayer = 2;
+    } else {
       G.phase = 'setupBench';
-      G.players[1].ready = false;
-      G.players[2].ready = false;
+      G.currentPlayer = 1;
       G.events.push({ type: 'phase_change', phase: 'setupBench' });
     }
     return true;
@@ -1603,6 +1610,9 @@ function processSetupChoice(G, playerNum, choices) {
 
   if (G.phase === 'setupBench') {
     if (!choices) choices = [];
+    // Limit bench to 4.
+    if (p.bench.length + choices.length > 4) return false;
+
     // Validate each selection
     for (var i = 0; i < choices.length; i++) {
       var bsel = choices[i];
@@ -1615,9 +1625,11 @@ function processSetupChoice(G, playerNum, choices) {
       p.hand = p.hand.filter(function(c) { return c.name !== bsel.name; });
       if (bsel.heldItem) p.hand = p.hand.filter(function(c) { return c.name !== bsel.heldItem; });
     }
-    p.ready = true;
 
-    if (G.players[1].ready && G.players[2].ready) {
+    // Advance turn: P1 -> P2, then enter battle.
+    if (playerNum === 1) {
+      G.currentPlayer = 2;
+    } else {
       G.phase = 'battle';
       G.currentPlayer = 1;
       G.turn = 1;
@@ -1683,6 +1695,40 @@ function filterStateForPlayer(G, playerNum) {
   state.players[oppNum].deck = [];
 
   state.myPlayerNum = playerNum;
+
+  // ----------------------------------------------------------
+  // Setup-phase visibility rules (multiplayer fairness)
+  // ----------------------------------------------------------
+  // In setupActive: the waiting player should not see the chooser's active/item.
+  if (G.phase === 'setupActive') {
+    if (G.currentPlayer === oppNum) {
+      state.players[oppNum].active = null;
+      state.players[oppNum].mana = null;
+    }
+  }
+
+  // In setupBench: active selections are public, but the waiting player
+  // should not see the chooser's bench until it is confirmed.
+  if (G.phase === 'setupBench') {
+    if (G.currentPlayer === oppNum) {
+      state.players[oppNum].bench = [];
+    }
+  }
+
+  // --- Setup information hiding (multiplayer) ---
+  // While a player is choosing in setupActive, the waiting player should not see
+  // any of the chooser's selection.
+  if (G.phase === 'setupActive' && G.currentPlayer === oppNum) {
+    state.players[oppNum].active = null;
+  }
+  // During setupBench, the waiting player should not see the chooser's bench-in-progress.
+  // (Bench is only revealed once confirmed, which on the server happens at submission.)
+  if (G.phase === 'setupBench' && G.currentPlayer === oppNum) {
+    state.players[oppNum].bench = state.players[oppNum].bench || [];
+    // The chooser's bench is already committed on submit; however, we still hide it
+    // while it's the chooser's turn to match the "waiting screen" behavior.
+    state.players[oppNum].bench = [];
+  }
 
   // Only show targeting if relevant to this player
   if (G.targeting && G.currentPlayer !== playerNum) {

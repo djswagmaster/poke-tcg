@@ -262,17 +262,10 @@ function handleSetupChoice(ws, msg) {
   }
 
   send(ws, { type: 'setupConfirmed' });
-  const oppNum = engine.oppPlayer(playerNum);
-  if (room.players[oppNum] && room.players[oppNum].ws) {
-    if (room.game.players[playerNum].ready && !room.game.players[oppNum].ready) {
-      send(room.players[oppNum].ws, { type: 'oppSetupConfirmed' });
-    }
-  }
-
-  // If phase changed (both ready), broadcast new state
-  if (room.game.phase === 'battle' || room.game.phase !== prevPhase) {
-    broadcastState(room);
-  }
+  // Setup is now turn-based; always broadcast state so the next player
+  // immediately receives the updated phase/currentPlayer and any
+  // newly-revealed info.
+  broadcastState(room);
 }
 
 function handleAction(ws, msg) {
