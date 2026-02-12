@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pokémon Custom TCG - Battle System</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- PARTICLE CONTAINER -->
+<div class="particle-container"></div>
+
+<!-- ZOOM OVERLAY -->
+<div class="zoom-overlay" id="zoomOverlay" onclick="closeZoom()"><img id="zoomImg" src=""></div>
+
+<!-- WIN OVERLAY -->
+<div class="win-overlay" id="winOverlay">
+  <div class="win-title">🏆 <span id="winName"></span> Wins!</div>
+  <div class="win-sub">First to 5 KOs!</div>
+  <button class="win-btn" onclick="location.reload()">Play Again</button>
+</div>
+
+<!-- SCREEN: LOBBY -->
+<div class="screen active" id="lobbyScreen">
+  <div class="lobby-screen">
+    <div class="lobby-title-main">Pokemon Custom TCG</div>
+    <div id="lobbyContent">
+      <div class="lobby-input-group">
+        <label>Your Name</label>
+        <input type="text" id="lobbyName" placeholder="Enter your name" maxlength="20" value="">
+      </div>
+      <div class="lobby-buttons">
+        <button class="lobby-btn lobby-btn-create" onclick="lobbyCreateRoom()">Create Room</button>
+        <div class="lobby-join-row">
+          <input type="text" id="lobbyCode" placeholder="CODE" maxlength="4" class="lobby-code-input">
+          <button class="lobby-btn lobby-btn-join" onclick="lobbyJoinRoom()">Join Room</button>
+        </div>
+      </div>
+      <div class="lobby-divider"><span>or</span></div>
+      <button class="lobby-btn lobby-btn-local" onclick="lobbyLocalPlay()">Local Play (Hot Seat)</button>
+      <div class="lobby-status" id="lobbyStatus"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: DECK BUILD -->
+<div class="screen" id="deckBuildScreen">
+  <div class="deck-build" style="display:flex;flex-direction:column;width:100%;height:100%">
+    <div class="db-header">
+      <div class="db-title"><span>⚡ Build Your Deck</span></div>
+      <div class="db-player-tag" id="dbPlayerTag">Player 1</div>
+    </div>
+    <div class="db-tabs">
+      <button class="db-tab active" id="dbTabPokemon" onclick="switchDbTab('pokemon')">Pokémon</button>
+      <button class="db-tab" id="dbTabItems" onclick="switchDbTab('items')">Items</button>
+    </div>
+    <div class="db-body">
+      <div class="db-cards" id="dbCardGrid"></div>
+      <div class="db-sidebar">
+        <div class="db-sidebar-head">
+          <div class="db-sidebar-title">Your Deck</div>
+          <div class="db-count" id="dbCount">0/15 cards</div>
+        </div>
+        <div class="db-sidebar-list" id="dbSidebarList"></div>
+        <div class="db-confirm"><button class="db-confirm-btn disabled" id="dbConfirmBtn" onclick="confirmDeck()">0/15 selected</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: PASS -->
+<div class="screen" id="passScreen">
+  <div class="pass-screen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;gap:20px">
+    <div class="pass-icon">🔄</div>
+    <div class="pass-title" id="passTitle">Player 2</div>
+    <div class="pass-sub" id="passSub">Pass the device</div>
+    <button class="pass-btn" id="passBtn">Ready</button>
+  </div>
+</div>
+
+<!-- SCREEN: SETUP -->
+<div class="screen" id="setupScreen">
+  <div class="setup-screen" style="display:flex;flex-direction:column;width:100%;height:100%">
+    <div class="setup-header">
+      <div class="setup-phase" id="setupPhaseText">Choose Active</div>
+      <div class="setup-mana" id="setupMana">Mana: 7</div>
+    </div>
+    <div class="setup-body">
+      <div class="setup-hand" id="setupHand"></div>
+      <div class="setup-preview" id="setupPreview"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: BATTLE -->
+<div class="screen" id="battleScreen">
+  <div class="battle-screen" style="display:flex;flex-direction:column;width:100%;height:100%">
+    <div class="battle-top-bar">
+      <div class="bt-player"><span class="bt-name" id="btP1Name">P1</span><div class="bt-kos" id="btP1Kos"></div><span class="bt-mana" id="btP1Mana">0⬡</span></div>
+      <div class="bt-turn" id="btTurn">Turn 1</div>
+      <div class="bt-player"><span class="bt-mana" id="btP2Mana">0⬡</span><div class="bt-kos" id="btP2Kos"></div><span class="bt-name" id="btP2Name">P2</span></div>
+    </div>
+    <div class="battle-field">
+      <div class="field-side opp" id="oppField"></div>
+      <div class="field-divider"></div>
+      <div class="field-side you" id="youField"></div>
+    </div>
+    <div class="action-panel">
+      <div class="ap-pokemon-info" id="apPokemonInfo"></div>
+      <div class="ap-actions" id="apActions"></div>
+      <div class="ap-hand" id="apHand"></div>
+      <div class="ap-log" id="apLog"></div>
+    </div>
+  </div>
+</div>
+
+<script src="pokemon-data.js"></script>
+<script src="card-images.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
