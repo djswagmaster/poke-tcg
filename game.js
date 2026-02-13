@@ -8,6 +8,8 @@ let myToken = null;
 let myRoomCode = null;
 let serverState = null; // Last state from server
 let isReplayingEvents = false;
+let useOptBoostThisAttack = false; // offline only; online uses server flag
+
 
 const TYPE_COLORS = {
   Normal:"#A8A77A",Fire:"#EE8130",Water:"#6390F0",Grass:"#7AC74C",Electric:"#F7D02C",
@@ -812,12 +814,12 @@ function actionGrantEnergy(target) {
   addLog(`Granted ${target.name} +1 energy (${cost} mana)`, '');
 
   // Determine which slot this target is in for animation
-  const me = cp();
-  if (target === me.active) {
+  const meP = cp();
+  if (target === meP.active) {
     animateEl('#youField .active-slot', 'energy-gain', 400);
     spawnParticlesAtEl('#youField .active-slot', '#F7D02C', 6, {spread:30, size:4});
   } else {
-    const bIdx = me.bench.indexOf(target);
+    const bIdx = meP.bench.indexOf(target);
     if (bIdx >= 0) {
       const sel = `#youField .field-bench-row .bench-slot:nth-child(${bIdx + 1})`;
       animateEl(sel, 'energy-gain', 400);
@@ -1105,8 +1107,8 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     }
   }
 
-  // Optional boost (full damage calc)
-  if (fx.includes('optBoost:') && defender && defender.hp > 0) {
+  // Optional boost (full damage calc) — requires player choice (offline)
+  if (useOptBoostThisAttack && fx.includes('optBoost:') && defender && defender.hp > 0) {
     const parts = fx.split('optBoost:')[1].split(':');
     const extraDmg = parseInt(parts[0]);
     const energyCost = parseInt(parts[1]);
@@ -1123,6 +1125,8 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       }
     }
   }
+  // Always reset after processing optBoost
+  useOptBoostThisAttack = false;
 
   // Any strip
   if (fx.includes('anyStrip:')) {
@@ -1168,7 +1172,24 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
 
 async function actionAttack(attackIndex) {
   if (G.animating) return;
-  if (isOnline) { sendAction({ actionType: 'attack', attackIndex }); return; }
+  if (isOnline) {
+    const myP = me();
+    const attacker = myP.active;
+    if (!attacker) return;
+    const data = getPokemonData(attacker.name);
+    const attack = data.attacks[attackIndex];
+    let useOptBoost = false;
+    if (attack && attack.fx && attack.fx.includes('optBoost:')) {
+      const parts = attack.fx.split('optBoost:')[1].split(':');
+      const extraDmg = parseInt(parts[0]);
+      const energyCost = parseInt(parts[1]);
+      if (attacker.energy >= energyCost) {
+        useOptBoost = confirm(`${attack.name}: Add +${extraDmg} damage by spending ${energyCost} energy?`);
+      }
+    }
+    sendAction({ actionType: 'attack', attackIndex, useOptBoost });
+    return;
+  }
   G.animating = true;
   const p = cp();
   const attacker = p.active;
@@ -1201,6 +1222,21 @@ async function actionAttack(attackIndex) {
   }
 
   const attack = data.attacks[attackIndex];
+
+  // Optional boost choice (offline)
+  if (attack && attack.fx && attack.fx.includes('optBoost:')) {
+    const parts = attack.fx.split('optBoost:')[1].split(':');
+    const extraDmg = parseInt(parts[0]);
+    const energyCost = parseInt(parts[1]);
+    if (attacker.energy >= energyCost) {
+      useOptBoostThisAttack = confirm(`${attack.name}: Add +${extraDmg} damage by spending ${energyCost} energy?`);
+    } else {
+      useOptBoostThisAttack = false;
+    }
+  } else {
+    useOptBoostThisAttack = false;
+  }
+
   let energyCost = attack.energy;
   if (attacker.quickClawActive) { energyCost = Math.max(0, energyCost - 2); }
   if (attacker.energy < energyCost) return;
@@ -2885,8 +2921,13 @@ async function replayEvents(events) {
         break;
       }
       case 'retreat': {
+        // Animate the active slot swap (match hotseat feel)
+        const actSel = getPokemonSelector(event.player, -1);
+        animateEl(actSel, 'slide-out', 320);
+        await delay(320);
         renderBattle();
-        await delay(400);
+        animateEl(actSel, 'slide-in', 320);
+        await delay(320);
         break;
       }
       case 'play_pokemon': {
