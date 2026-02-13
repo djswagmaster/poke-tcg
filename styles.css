@@ -190,6 +190,8 @@ button { cursor:pointer; font-family:inherit; }
 .damage-popup.nve { color:#888; font-size:22px; }
 .damage-popup.dmg-heavy { font-size:40px; animation:dmgPopHeavy 1.4s forwards; }
 .damage-popup.dmg-massive { font-size:54px; animation:dmgPopMassive 2s forwards; text-shadow:0 0 12px rgba(239,68,68,0.6), 0 2px 4px rgba(0,0,0,0.5); }
+.damage-popup.energy-popup { color:#F7D02C; font-size:22px; }
+.damage-popup.mana-popup { color:#38bdf8; font-size:22px; }
 @keyframes dmgPop { 0% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-60px) scale(1.2); } }
 @keyframes dmgPopHeavy { 0% { opacity:1; transform:translateY(0) scale(1.1); } 50% { opacity:1; } 100% { opacity:0; transform:translateY(-70px) scale(1.4); } }
 @keyframes dmgPopMassive { 0% { opacity:1; transform:translateY(0) scale(1.3); } 60% { opacity:1; } 100% { opacity:0; transform:translateY(-80px) scale(1.6); } }
@@ -290,3 +292,74 @@ button { cursor:pointer; font-family:inherit; }
 .lobby-status.error { color:#ef4444; }
 .lobby-code { font-size:48px; font-weight:900; letter-spacing:12px; color:#fff; background:rgba(255,255,255,0.06); padding:20px 40px; border-radius:16px; border:2px solid rgba(255,255,255,0.1); text-align:center; }
 .lobby-title { font-size:14px; color:#888; text-transform:uppercase; letter-spacing:2px; font-weight:600; }
+
+/* ===== MOBILE RESPONSIVE ===== */
+@media (max-width: 768px) {
+  body { overflow:auto; }
+  .battle-screen { height:100vh; min-height:100vh; }
+
+  /* Action panel stacks vertically */
+  .action-panel { height:auto; max-height:50vh; flex-direction:column; overflow-y:auto; }
+  .ap-pokemon-info { width:100%; border-right:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:8px 12px; flex-direction:row; flex-wrap:wrap; gap:4px 12px; }
+  .ap-actions { width:100%; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.06); max-height:180px; overflow-y:auto; }
+  .ap-btn { min-width:110px; padding:8px 12px; }
+  .ap-hand { width:100%; border-left:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:8px 12px; max-height:140px; }
+  .ap-log { width:100%; border-left:none; padding:8px 12px; max-height:120px; }
+
+  /* Smaller Pokemon images */
+  .field-pokemon.active-slot .fp-img { width:100px; }
+  .field-pokemon.bench-slot .fp-img { width:65px; }
+  .bench-empty { width:65px; height:90px; }
+
+  /* Battle field */
+  .battle-field { min-height:200px; }
+  .field-bench-row { gap:6px; }
+  .field-side { padding:4px 10px; gap:4px; }
+
+  /* Top bar compact */
+  .battle-top-bar { height:40px; padding:0 10px; }
+  .bt-name { font-size:12px; }
+  .bt-mana { font-size:16px; padding:2px 8px; }
+  .bt-ko { width:10px; height:10px; }
+  .bt-turn { font-size:11px; }
+
+  /* Mana display */
+  .mana-display { padding:4px 8px; border-radius:10px; }
+  .mana-icon { font-size:20px; }
+  .mana-current { font-size:20px; }
+  .mana-max { font-size:11px; }
+
+  /* Hand cards compact */
+  .ap-hand-card img { width:48px; }
+  .ap-hand-card { padding:6px; margin-bottom:4px; }
+
+  /* Deck build */
+  .db-sidebar { width:180px; }
+  .db-card { width:90px; }
+
+  /* Smaller info text */
+  .fp-name { font-size:10px; }
+  .fp-stats { font-size:11px; gap:4px; }
+  .fp-hp-bar { width:70px; height:6px; }
+  .bench-slot .fp-info .fp-hp-bar { width:55px; height:4px; }
+  .bench-slot .fp-info .fp-stats { font-size:9px; }
+  .bench-slot .fp-info .fp-name { font-size:9px; }
+
+  /* Held item smaller */
+  .field-pokemon .fp-held-item { width:24px; right:-10px; }
+}
+
+@media (max-width: 480px) {
+  .ap-btn { min-width:90px; font-size:11px; padding:6px 8px; }
+  .field-pokemon.active-slot .fp-img { width:80px; }
+  .field-pokemon.bench-slot .fp-img { width:50px; }
+  .bench-empty { width:50px; height:70px; }
+  .db-sidebar { width:140px; }
+  .db-card { width:70px; }
+  .fp-hp-bar { width:60px; }
+  .bench-slot .fp-info .fp-hp-bar { width:45px; }
+  .field-pokemon .fp-held-item { width:20px; right:-8px; }
+  .battle-top-bar { height:36px; }
+  .bt-name { font-size:10px; }
+  .bt-mana { font-size:14px; }
+}

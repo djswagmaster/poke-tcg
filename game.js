@@ -278,6 +278,9 @@ const G = {
   pendingRetreat: null,
 };
 
+// Track previous HP percentages for smooth bar transitions
+const prevHpPct = {};
+
 function getImg(name) {
   const b64 = CARD_IMAGES[name];
   return b64 ? 'data:image/png;base64,' + b64 : '';
@@ -393,6 +396,86 @@ function getPokemonSelector(playerNum, benchIdx) {
   const side = playerNum === meNum() ? '#youField' : '#oppField';
   if (benchIdx === -1) return side + ' .active-slot';
   return side + ' .field-bench-row > :nth-child(' + (benchIdx + 1) + ')';
+}
+
+// Find which slot a pokemon is in, return CSS selector
+function findPokemonSelector(pokemon) {
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const p = G.players[pNum];
+    if (p.active === pokemon) return getPokemonSelector(pNum, -1);
+    const bIdx = p.bench.indexOf(pokemon);
+    if (bIdx >= 0) return getPokemonSelector(pNum, bIdx);
+  }
+  return null;
+}
+
+// Snapshot all pokemon HP% before render
+function captureHpState() {
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const p = G.players[pNum];
+    if (p.active) prevHpPct[pNum + '-active'] = Math.max(0, (p.active.hp / p.active.maxHp) * 100);
+    p.bench.forEach((pk, i) => { prevHpPct[pNum + '-bench-' + i] = Math.max(0, (pk.hp / pk.maxHp) * 100); });
+  }
+}
+
+// After innerHTML rebuild, animate HP bars from old to new values
+function animateHpBars() {
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const side = pNum === meNum() ? '#youField' : '#oppField';
+    const p = G.players[pNum];
+    if (p.active) {
+      const key = pNum + '-active';
+      const fill = document.querySelector(side + ' .active-slot .fp-hp-fill');
+      if (fill && prevHpPct[key] !== undefined) {
+        const newPct = Math.max(0, (p.active.hp / p.active.maxHp) * 100);
+        if (Math.abs(prevHpPct[key] - newPct) > 0.5) {
+          fill.style.width = prevHpPct[key] + '%';
+          requestAnimationFrame(() => { requestAnimationFrame(() => { fill.style.width = newPct + '%'; }); });
+        }
+      }
+    }
+    p.bench.forEach((pk, i) => {
+      const key = pNum + '-bench-' + i;
+      const fill = document.querySelector(side + ' .field-bench-row > :nth-child(' + (i + 1) + ') .fp-hp-fill');
+      if (fill && prevHpPct[key] !== undefined) {
+        const newPct = Math.max(0, (pk.hp / pk.maxHp) * 100);
+        if (Math.abs(prevHpPct[key] - newPct) > 0.5) {
+          fill.style.width = prevHpPct[key] + '%';
+          requestAnimationFrame(() => { requestAnimationFrame(() => { fill.style.width = newPct + '%'; }); });
+        }
+      }
+    });
+  }
+}
+
+// Energy gain popup (yellow)
+function showEnergyPopup(targetSelector, text) {
+  const target = document.querySelector(targetSelector);
+  const el = document.createElement('div');
+  el.className = 'damage-popup energy-popup';
+  el.textContent = text;
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
+}
+
+// Mana gain popup (cyan)
+function showManaPopup(amount) {
+  const manaEl = document.querySelector('.mana-display');
+  const el = document.createElement('div');
+  el.className = 'damage-popup mana-popup';
+  el.textContent = '+' + amount + ' Mana';
+  if (manaEl) {
+    const rect = manaEl.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top - 20) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
 }
 
 // Type-based particle colors
@@ -539,7 +622,7 @@ function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
   // Mega Aggron Filter: block any final damage that is 50 or less
   if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked()) return { damage: 0, mult, filtered: true };
 
-  return { damage: totalDmg, mult, luckyProc };
+  return { damage: totalDmg, mult, luckyProc, reduction };
 }
 
 // ============================================================
@@ -556,7 +639,9 @@ function dealDamage(pokemon, amount, player) {
     pokemon.hp = 10;
     pokemon.heldItemUsed = true;
     pokemon.heldItem = null;
-    addLog(`Focus Sash saves ${pokemon.name}! (Discarded)`, 'effect');
+    const sashSel = findPokemonSelector(pokemon);
+    if (sashSel) { showDamagePopupAt(0, sashSel, true); animateEl(sashSel, 'item-proc', 600); }
+    addLog(`Focus Sash saves ${pokemon.name} at 10 HP! (Discarded)`, 'effect');
     return false;
   }
 
@@ -566,6 +651,8 @@ function dealDamage(pokemon, amount, player) {
     pokemon.hp = pokemon.maxHp - pokemon.damage;
     pokemon.heldItemUsed = true;
     pokemon.heldItem = null;
+    const sitSel = findPokemonSelector(pokemon);
+    if (sitSel) { showDamagePopupAt(60, sitSel, true); animateEl(sitSel, 'heal-pulse', 500); animateEl(sitSel, 'item-proc', 600); }
     addLog(`Sitrus Berry heals ${pokemon.name} for 60! (Discarded)`, 'heal');
   }
 
@@ -614,7 +701,10 @@ function handleKO(pokemon, ownerPlayerNum) {
 // ============================================================
 function startTurn() {
   const p = cp();
+  const oldMana = p.mana;
   p.mana = Math.min(10, p.mana + 2);
+  const manaGained = p.mana - oldMana;
+  if (manaGained > 0) showManaPopup(manaGained);
   p.usedAbilities = {};
   // Clear Ditto's improvise at start of new turn
   if (p.active) p.active.improviseActive = false;
@@ -631,6 +721,9 @@ function startTurn() {
     if (d.ability && d.ability.key === 'berryJuice' && pk.damage > 0 && !isPassiveBlocked()) {
       pk.damage = Math.max(0, pk.damage - 20);
       pk.hp = pk.maxHp - pk.damage;
+      const sel = getPokemonSelector(G.currentPlayer, pk === p.active ? -1 : p.bench.indexOf(pk));
+      showDamagePopupAt(20, sel, true);
+      animateEl(sel, 'heal-pulse', 500);
       addLog(`Berry Juice heals ${pk.name} 20`, 'heal');
     }
   });
@@ -643,6 +736,9 @@ function startTurn() {
       pk.hp = pk.maxHp - pk.damage;
       pk.heldItemUsed = true;
       pk.heldItem = null;
+      const sel = getPokemonSelector(G.currentPlayer, pk === p.active ? -1 : p.bench.indexOf(pk));
+      showDamagePopupAt(30, sel, true);
+      animateEl(sel, 'heal-pulse', 500);
       addLog(`Lum Berry cures ${pk.name}! (Discarded)`, 'heal');
     }
   });
@@ -696,6 +792,7 @@ async function endTurn() {
       spawnParticlesAtEl(sideSelector, '#A33EA1', 10, {spread:40, size:5});
       animateEl(sideSelector, 'status-apply', 500);
       const ko = dealDamage(pk, 10, ownerNum);
+      showDamagePopupAt(10, sideSelector, false);
       addLog(`Poison deals 10 to ${pk.name}`, 'damage');
       renderBattle();
       await delay(600);
@@ -712,6 +809,7 @@ async function endTurn() {
       spawnParticlesAtEl(sideSelector, '#EE8130', 12, {spread:45, size:5});
       animateEl(sideSelector, 'status-apply', 500);
       const ko = dealDamage(pk, 20, ownerNum);
+      showDamagePopupAt(20, sideSelector, false);
       addLog(`Burn deals 20 to ${pk.name}`, 'damage');
       renderBattle();
       await delay(600);
@@ -747,12 +845,17 @@ async function endTurn() {
   }
 
   // Leftovers: heal 10 after each player's turn (both players' pokemon)
-  const allPokemonBoth = [p.active, ...p.bench, op().active, ...op().bench].filter(Boolean);
-  for (const pk of allPokemonBoth) {
-    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
-      pk.damage = Math.max(0, pk.damage - 10);
-      pk.hp = pk.maxHp - pk.damage;
-      addLog(`Leftovers heals ${pk.name} 10`, 'heal');
+  for (const [pNum, pObj] of [[G.currentPlayer, p], [opp(G.currentPlayer), op()]]) {
+    const allPk = [pObj.active, ...pObj.bench].filter(Boolean);
+    for (const pk of allPk) {
+      if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
+        pk.damage = Math.max(0, pk.damage - 10);
+        pk.hp = pk.maxHp - pk.damage;
+        const sel = getPokemonSelector(pNum, pk === pObj.active ? -1 : pObj.bench.indexOf(pk));
+        showDamagePopupAt(10, sel, true);
+        animateEl(sel, 'heal-pulse', 500);
+        addLog(`Leftovers heals ${pk.name} 10`, 'heal');
+      }
     }
   }
 
@@ -786,11 +889,15 @@ function actionGrantEnergy(target) {
   if (p.mana < cost || target.energy >= 5) return;
   p.mana -= cost;
   target.energy++;
+  const enSel = findPokemonSelector(target);
+  if (enSel) { showEnergyPopup(enSel, '+1 ⚡'); animateEl(enSel, 'energy-gain', 400); }
 
   // Healing Scarf
   if (target.heldItem === 'Healing Scarf' && target.damage > 0) {
     target.damage = Math.max(0, target.damage - 20);
     target.hp = target.maxHp - target.damage;
+    const hsSel = findPokemonSelector(target);
+    if (hsSel) { showDamagePopupAt(20, hsSel, true); animateEl(hsSel, 'heal-pulse', 500); }
     addLog(`Healing Scarf heals ${target.name} 20`, 'heal');
   }
 
@@ -867,7 +974,10 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const selfAtk = {...attack, baseDmg: v};
     const selfRes = calcDamage(attacker, attacker, selfAtk, attackerData.types, G.currentPlayer);
     if (selfRes.filtered) { addLog(`${attacker.name}'s Filter blocks the recoil!`, 'effect'); }
-    else if (selfRes.damage > 0) { dealDamage(attacker, selfRes.damage, G.currentPlayer); }
+    else if (selfRes.damage > 0) {
+      dealDamage(attacker, selfRes.damage, G.currentPlayer);
+      showDamagePopupAt(selfRes.damage, getPokemonSelector(meNum(), -1), false);
+    }
   }
   if (fx.includes('selfEnergyLoss:')) {
     let v = parseInt(fx.split('selfEnergyLoss:')[1]);
@@ -913,6 +1023,10 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       const res = calcDamage(attacker, pk, benchAllAtk, attackerData.types, ownerNum);
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
+        const benchIdx = p.bench.includes(pk) ? p.bench.indexOf(pk) : op().bench.indexOf(pk);
+        const sel = getPokemonSelector(ownerNum, benchIdx);
+        showDamagePopupAt(res.damage, sel, false);
+        animateEl(sel, 'hit-shake', 500);
         const ko = dealDamage(pk, res.damage, ownerNum);
         if (ko) handleKO(pk, ownerNum);
       }
@@ -926,6 +1040,9 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       const res = calcDamage(attacker, pk, oppBenchAtk, attackerData.types, opp(G.currentPlayer));
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
+        const sel = getPokemonSelector(opp(G.currentPlayer), op().bench.indexOf(pk));
+        showDamagePopupAt(res.damage, sel, false);
+        animateEl(sel, 'hit-shake', 500);
         const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
         if (ko) handleKO(pk, opp(G.currentPlayer));
       }
@@ -971,6 +1088,9 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       const sbRes = calcDamage(attacker, target, sbAtk, attackerData.types, G.currentPlayer);
       if (sbRes.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); }
       else if (sbRes.damage > 0) {
+        const sel = getPokemonSelector(meNum(), 0);
+        showDamagePopupAt(sbRes.damage, sel, false);
+        animateEl(sel, 'hit-shake', 500);
         dealDamage(target, sbRes.damage, G.currentPlayer);
         addLog(`Collateral: ${sbRes.damage} to ${target.name}`, 'damage');
       }
@@ -996,6 +1116,8 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const v = parseInt(fx.split('healSelf:')[1]);
     attacker.damage = Math.max(0, attacker.damage - v);
     attacker.hp = attacker.maxHp - attacker.damage;
+    showDamagePopupAt(v, getPokemonSelector(meNum(), -1), true);
+    animateEl(getPokemonSelector(meNum(), -1), 'heal-pulse', 500);
     addLog(`${attacker.name} healed ${v}`, 'heal');
   }
 
@@ -1092,6 +1214,9 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         const res = calcDamage(attacker, pk, condAtk, attackerData.types, opp(G.currentPlayer));
         if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
         if (res.damage > 0) {
+          const sel = getPokemonSelector(opp(G.currentPlayer), op().bench.indexOf(pk));
+          showDamagePopupAt(res.damage, sel, false);
+          animateEl(sel, 'hit-shake', 500);
           const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
           if (ko) handleKO(pk, opp(G.currentPlayer));
         }
@@ -1144,6 +1269,10 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       const res = calcDamage(attacker, target, multiAtk, attackerData.types, opp(G.currentPlayer));
       if (res.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
+        const tIdx = target === op().active ? -1 : op().bench.indexOf(target);
+        const sel = getPokemonSelector(opp(G.currentPlayer), tIdx);
+        showDamagePopupAt(res.damage, sel, false);
+        animateEl(sel, getShakeClass(res.damage), getShakeDuration(res.damage));
         const ko = dealDamage(target, res.damage, opp(G.currentPlayer));
         addLog(`${res.damage} to ${target.name}`, 'damage');
         if (ko) handleKO(target, opp(G.currentPlayer));
@@ -1192,20 +1321,24 @@ function processPreDamageEffectsClient(fx, attacker, p) {
   if (fx.includes('selfEnergy:')) {
     const v = parseInt(fx.split('selfEnergy:')[1]);
     attacker.energy = Math.min(5, attacker.energy + v);
+    showEnergyPopup(getPokemonSelector(meNum(), -1), '+' + v + ' ⚡');
+    animateEl(getPokemonSelector(meNum(), -1), 'energy-gain', 400);
     if (attacker.heldItem === 'Healing Scarf' && attacker.damage > 0 && v > 0) {
       attacker.damage = Math.max(0, attacker.damage - 20 * v);
       attacker.hp = attacker.maxHp - attacker.damage;
+      showDamagePopupAt(20*v, getPokemonSelector(meNum(), -1), true);
+      animateEl(getPokemonSelector(meNum(), -1), 'heal-pulse', 500);
       addLog(`Healing Scarf heals ${attacker.name} ${20*v}`, 'heal');
     }
   }
-  if (fx.includes('gainMana:')) { const v = parseInt(fx.split('gainMana:')[1]); p.mana = Math.min(10, p.mana + v); addLog(`Gained ${v} mana`, 'info'); }
+  if (fx.includes('gainMana:')) { const v = parseInt(fx.split('gainMana:')[1]); p.mana = Math.min(10, p.mana + v); showManaPopup(v); addLog(`Gained ${v} mana`, 'info'); }
   if (fx.includes('benchEnergyAll')) {
-    p.bench.forEach(pk => { if (pk.energy < 5) { pk.energy++; } });
+    p.bench.forEach((pk, i) => { if (pk.energy < 5) { pk.energy++; const sel = getPokemonSelector(meNum(), i); showEnergyPopup(sel, '+1 ⚡'); animateEl(sel, 'energy-gain', 400); } });
     addLog(`Gift Delivery: bench +1 energy each`, 'info');
   }
   if (fx.includes('benchEnergy:')) {
     const target = p.bench.find(pk => pk.energy < 5);
-    if (target) { target.energy++; addLog(`${target.name} gained +1 energy`, 'info'); }
+    if (target) { target.energy++; const sel = getPokemonSelector(meNum(), p.bench.indexOf(target)); showEnergyPopup(sel, '+1 ⚡'); animateEl(sel, 'energy-gain', 400); addLog(`${target.name} gained +1 energy`, 'info'); }
   }
 }
 
@@ -1225,7 +1358,8 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     let effText = '';
     if (result.mult > 1) effText = ' (Super Effective!)';
     if (result.mult < 1) effText = ' (Resisted)';
-    addLog(`${attack.name} deals ${result.damage} to ${defender.name}${effText}`, 'damage');
+    const redText = result.reduction > 0 ? ` (-${result.reduction} reduced)` : '';
+    addLog(`${attack.name} deals ${result.damage} to ${defender.name}${effText}${redText}`, 'damage');
     showDamagePopup(result.damage, result.mult);
     animateEl("#oppField .active-slot", getShakeClass(result.damage), getShakeDuration(result.damage));
     const attackerColor = TYPE_PARTICLE_COLORS[attackerTypes[0]] || '#ef4444';
@@ -1237,6 +1371,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     // Reactive items on defender
     if (defender.heldItem === 'Rocky Helmet') {
       dealDamage(attacker, 30, G.currentPlayer);
+      showDamagePopupAt(30, '#youField .active-slot', false);
       addLog(`Rocky Helmet deals 30 back!`, 'damage');
       animateEl("#oppField .active-slot", "item-proc", 600);
       spawnParticlesAtEl("#oppField .active-slot", '#B7B7CE', 8, {spread:40});
@@ -1244,6 +1379,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
+      showDamagePopupAt(10, '#youField .active-slot', false);
       if (!attacker.status.includes('burn')) attacker.status.push('burn');
       addLog(`Burn Scarf: 10 damage + Burn!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
@@ -1252,6 +1388,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
+      showDamagePopupAt(10, '#youField .active-slot', false);
       if (!attacker.status.includes('poison')) attacker.status.push('poison');
       addLog(`Poison Barb: 10 damage + Poison!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
@@ -1260,6 +1397,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
+      showDamagePopupAt(10, '#youField .active-slot', false);
       if (!attacker.status.includes('confusion')) attacker.status.push('confusion');
       addLog(`Loud Bell: 10 damage + Confusion!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
@@ -1271,6 +1409,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     if (attacker.heldItem === 'Shell Bell') {
       attacker.damage = Math.max(0, attacker.damage - 30);
       attacker.hp = attacker.maxHp - attacker.damage;
+      showDamagePopupAt(30, '#youField .active-slot', true);
       addLog(`Shell Bell heals ${attacker.name} 30`, 'heal');
       animateEl("#youField .active-slot", "heal-pulse", 500);
       spawnParticlesAtEl("#youField .active-slot", '#4ade80', 8, {spread:35});
@@ -1281,6 +1420,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     // Life Orb recoil
     if (attacker.heldItem === 'Life Orb') {
       dealDamage(attacker, 10, G.currentPlayer);
+      showDamagePopupAt(10, '#youField .active-slot', false);
       addLog(`Life Orb recoil: 10 to ${attacker.name}`, 'damage');
       renderBattle();
       await delay(300);
@@ -1778,8 +1918,9 @@ async function useAbility(key) {
         tPk.damage = Math.max(0, tPk.damage - 10);
         tPk.hp = tPk.maxHp - tPk.damage;
         p.usedAbilities[key] = true;
-        addLog("Egg Drop Heal: healed "+tPk.name+" 10!", "heal");
         const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
+        showDamagePopupAt(10, targetSel, true);
+        addLog("Egg Drop Heal: healed "+tPk.name+" 10!", "heal");
         animateEl(targetSel, 'heal-pulse', 500);
         spawnParticlesAtEl(targetSel, '#4ade80', 8, {spread:30});
         renderBattle();
@@ -1795,7 +1936,9 @@ async function useAbility(key) {
       p.active.hp = p.active.maxHp - p.active.damage;
     }
     p.active.status = [];
-    addLog(`Healing Touch: heal 20, clear status`, 'heal');
+    showDamagePopupAt(30, getPokemonSelector(meNum(), -1), true);
+    animateEl(getPokemonSelector(meNum(), -1), 'heal-pulse', 500);
+    addLog(`Healing Touch: heal 30, clear status`, 'heal');
     // Don't mark as used - unlimited uses
   }
   else if (key === 'yummyDelivery') {
@@ -1806,6 +1949,8 @@ async function useAbility(key) {
     if (validTargets.length === 0) return;
     G.targeting = { type: 'yummyDelivery', validTargets, context: {}, callback: function(tPk) {
       tPk.energy++;
+      const ydSel = findPokemonSelector(tPk);
+      if (ydSel) { showEnergyPopup(ydSel, '+1 ⚡'); animateEl(ydSel, 'energy-gain', 400); }
       p.usedAbilities[key] = true;
       addLog(`Yummy Delivery: ${tPk.name} +1 energy`, 'effect');
       renderBattle();
@@ -1824,6 +1969,8 @@ async function useAbility(key) {
   else if (key === 'hiddenPower') {
     if (p.active && p.active.energy < 5) {
       p.active.energy++;
+      showEnergyPopup(getPokemonSelector(meNum(), -1), '+1 ⚡');
+      animateEl(getPokemonSelector(meNum(), -1), 'energy-gain', 400);
       p.usedAbilities[key] = true;
       addLog(`Hidden Power: Active +1 energy, turn ends`, 'effect');
   await endTurn();
@@ -1842,6 +1989,7 @@ async function useAbility(key) {
     G.targeting = { type:"creepingChill", validTargets:validTargets, callback:function(tPk,tOwner){
       const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
       dealDamage(tPk, 10, tOwner);
+      showDamagePopupAt(10, targetSel, false);
       p.usedAbilities[key] = true;
       addLog("Creeping Chill: 10 to "+tPk.name, "damage");
       animateEl(targetSel, 'hit-shake', 500);
@@ -1869,6 +2017,8 @@ async function useAbility(key) {
     if (!p.active || getPokemonData(p.active.name).ability?.key !== 'megaSpeed') return;
     if (p.active.energy >= 5) return;
     p.active.energy++;
+    showEnergyPopup(getPokemonSelector(meNum(), -1), '+1 ⚡');
+    animateEl(getPokemonSelector(meNum(), -1), 'energy-gain', 400);
     p.usedAbilities[key] = true;
     addLog(`Mega Speed: ${p.active.name} +1 energy`, 'effect');
   }
@@ -2212,6 +2362,7 @@ function confirmSetup() {
 
 // ---------- BATTLE RENDERING ----------
 function renderBattle() {
+  captureHpState();
   const myP = me();
   const theirP = them();
 
@@ -2246,6 +2397,9 @@ function renderBattle() {
   renderActionPanel();
   renderHandPanel();
   renderLogPanel();
+
+  // Animate HP bars (must be after innerHTML rebuild)
+  animateHpBars();
 }
 
 function renderFieldSide(containerId, player, playerNum) {

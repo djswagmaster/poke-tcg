@@ -402,7 +402,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G))
     return { damage: 0, mult: mult, filtered: true };
 
-  return { damage: totalDmg, mult: mult, luckyProc: luckyProc };
+  return { damage: totalDmg, mult: mult, luckyProc: luckyProc, reduction: reduction };
 }
 
 // ============================================================
@@ -946,7 +946,8 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
     var effText = '';
     if (result.mult > 1) effText = ' (Super Effective!)';
     if (result.mult < 1) effText = ' (Resisted)';
-    addLog(G, attack.name + ' deals ' + result.damage + ' to ' + defender.name + effText, 'damage');
+    var redText = result.reduction > 0 ? ' (-' + result.reduction + ' reduced)' : '';
+    addLog(G, attack.name + ' deals ' + result.damage + ' to ' + defender.name + effText + redText, 'damage');
     G.events.push({ type: 'damage', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, amount: result.damage, mult: result.mult, attackName: attack.name });
 
     // Reactive items
