@@ -299,7 +299,7 @@ function makePokemon(name, heldItem) {
   const actualItem = heldItem === 'Power Herb' ? null : heldItem;
   return {
     name, maxHp, hp: maxHp, energy, heldItem: actualItem, heldItemUsed: heldItem === 'Power Herb',
-    status: null, damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
+    status: [], damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
     vulnerability: 0, quickClawActive: heldItem === 'Quick Claw',
     grassWeakUntil: 0, improviseActive: false,
   };
@@ -474,7 +474,7 @@ function calcWeaknessResistance(attackerTypes, defender) {
   return 1.0;
 }
 
-function calcDamage(attacker, defender, attack, attackerTypes) {
+function calcDamage(attacker, defender, attack, attackerTypes, isOppActive) {
   let baseDmg = attack.baseDmg;
   const fx = attack.fx || '';
 
@@ -492,21 +492,21 @@ function calcDamage(attacker, defender, attack, attackerTypes) {
 
   if (baseDmg <= 0) return { damage: 0, mult: 1 };
 
-  // Damage modifiers (BEFORE weakness/resistance)
-  if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
-  if (attacker.heldItem === 'Life Orb') baseDmg += 30;
-
-  // Lucky Punch (50% chance)
+  // Damage modifiers (BEFORE weakness/resistance) - only vs opponent's active
   let luckyProc = false;
-  if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
+  if (isOppActive) {
+    if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
+    if (attacker.heldItem === 'Life Orb') baseDmg += 30;
+    if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
+  }
 
   // Weakness/Resistance multiplier
   let ignoreRes = fx.includes('ignoreRes');
   let mult = calcWeaknessResistance(attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
 
-  // Expert Belt: 2x instead of 1.5x
-  if (attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+  // Expert Belt: 2x instead of 1.5x - only vs opponent's active
+  if (isOppActive && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
 
   let totalDmg = Math.floor(baseDmg * mult);
 
@@ -641,8 +641,8 @@ function startTurn() {
 
   // Lum Berry auto
   allPokemon.forEach(pk => {
-    if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status) {
-      pk.status = null;
+    if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status.length > 0) {
+      pk.status = [];
       pk.damage = Math.max(0, pk.damage - 30);
       pk.hp = pk.maxHp - pk.damage;
       pk.heldItemUsed = true;
@@ -680,15 +680,6 @@ async function endTurn() {
     }
   });
 
-  // Leftovers heal for opponent too (heals after EACH player's turn)
-  const oppAll = [op().active, ...op().bench].filter(Boolean);
-  oppAll.forEach(pk => {
-    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
-      pk.damage = Math.max(0, pk.damage - 10);
-      pk.hp = pk.maxHp - pk.damage;
-    }
-  });
-
   // Sustained tracking: copy attackedThisTurn into sustained, then clear it
   // This way sustained is only true if the pokemon attacked on THIS turn,
   // giving the bonus on the NEXT turn's attack only
@@ -705,7 +696,7 @@ async function endTurn() {
     const sideSelector = side === p ? '#youField .active-slot' : '#oppField .active-slot';
 
     // Poison: 10 damage
-    if (pk.status === 'poison') {
+    if (pk.status.includes('poison')) {
       spawnParticlesAtEl(sideSelector, '#A33EA1', 10, {spread:40, size:5});
       animateEl(sideSelector, 'status-apply', 500);
       const ko = dealDamage(pk, 10, ownerNum);
@@ -721,7 +712,7 @@ async function endTurn() {
     }
 
     // Burn: 20 damage, 50/50 cleanse
-    if (pk.status === 'burn') {
+    if (pk.status.includes('burn')) {
       spawnParticlesAtEl(sideSelector, '#EE8130', 12, {spread:45, size:5});
       animateEl(sideSelector, 'status-apply', 500);
       const ko = dealDamage(pk, 20, ownerNum);
@@ -734,21 +725,21 @@ async function endTurn() {
         handleKO(pk, ownerNum);
         await delay(400);
       }
-      if (pk && pk.status === 'burn' && Math.random() < 0.5) {
-        pk.status = null;
+      if (pk && pk.status.includes('burn') && Math.random() < 0.5) {
+        pk.status = pk.status.filter(s => s !== 'burn');
         addLog(`${pk.name}'s burn healed! (Heads)`, 'heal');
         animateEl(sideSelector, 'status-cure', 500);
         renderBattle();
         await delay(400);
-      } else if (pk && pk.status === 'burn') {
+      } else if (pk && pk.status.includes('burn')) {
         addLog(`${pk.name} is still Burned (Tails)`, 'info');
       }
     }
 
     // Sleep: 50/50 coin flip to cure
-    if (pk.status === 'sleep') {
+    if (pk.status.includes('sleep')) {
       if (Math.random() < 0.5) {
-        pk.status = null;
+        pk.status = pk.status.filter(s => s !== 'sleep');
         addLog(`${pk.name} woke up! (Heads)`, 'info');
         animateEl(sideSelector, 'status-cure', 500);
         renderBattle();
@@ -830,20 +821,20 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   // Attacker metadata is used by multiple effect handlers.
   const attackerData = getPokemonData(attacker.name);
   // Status effects from attack
-  if (fx.includes('poison') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'poison'; addLog(`${defender.name} is Poisoned!`, 'effect');
+  if (fx.includes('poison') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('poison')) {
+    defender.status.push('poison'); addLog(`${defender.name} is Poisoned!`, 'effect');
     animateEl("#oppField .active-slot", "status-apply", 500);
     spawnParticlesAtEl("#oppField .active-slot", '#A33EA1', 10, {spread:40});
     renderBattle(); await delay(500);
   }
-  if (fx.includes('burn') && !fx.includes('hexBurn') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'burn'; addLog(`${defender.name} is Burned!`, 'effect');
+  if (fx.includes('burn') && !fx.includes('hexBurn') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('burn')) {
+    defender.status.push('burn'); addLog(`${defender.name} is Burned!`, 'effect');
     animateEl("#oppField .active-slot", "status-apply", 500);
     spawnParticlesAtEl("#oppField .active-slot", '#EE8130', 10, {spread:40});
     renderBattle(); await delay(500);
   }
-  if (fx.includes('sleep') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'sleep'; addLog(`${defender.name} fell Asleep!`, 'effect');
+  if (fx.includes('sleep') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('sleep')) {
+    defender.status.push('sleep'); addLog(`${defender.name} fell Asleep!`, 'effect');
     animateEl("#oppField .active-slot", "status-apply", 500);
     spawnParticlesAtEl("#oppField .active-slot", '#6b7280', 10, {spread:40});
     renderBattle(); await delay(500);
@@ -864,11 +855,11 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     addLog(`Stripped ${actual} energy from ${defender.name}`, 'effect');
   }
 
-  // Self damage
+  // Self damage (no item bonuses since not hitting opp active)
   if (fx.includes('selfDmg:')) {
     const v = parseInt(fx.split('selfDmg:')[1]);
     const selfAtk = {...attack, baseDmg: v};
-    const selfRes = calcDamage(attacker, attacker, selfAtk, attackerData.types);
+    const selfRes = calcDamage(attacker, attacker, selfAtk, attackerData.types, false);
     if (selfRes.filtered) { addLog(`${attacker.name}'s Filter blocks the recoil!`, 'effect'); }
     else if (selfRes.damage > 0) { dealDamage(attacker, selfRes.damage, G.currentPlayer); }
   }
@@ -889,7 +880,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx.includes('selfVuln:')) { const v = parseInt(fx.split('selfVuln:')[1]); attacker.vulnerability = v; }
 
   // Self sleep
-  if (fx.includes('selfSleep')) { attacker.status = 'sleep'; addLog(`${attacker.name} fell asleep!`, 'effect'); }
+  if (fx.includes('selfSleep') && !attacker.status.includes('sleep')) { attacker.status.push('sleep'); addLog(`${attacker.name} fell asleep!`, 'effect'); }
 
   // Self retreat
   if (fx.includes('selfRetreat') && p.bench.length > 0) {
@@ -901,7 +892,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   // Force switch opponent
   if (fx.includes('forceSwitch') && op().bench.length > 0 && defender && defender.hp > 0) {
     const newActive = op().bench.shift();
-    if (op().active.status) { addLog(`${op().active.name}'s ${op().active.status} was cured on bench!`, 'heal'); op().active.status = null; }
+    if (op().active.status.length > 0) { addLog(`${op().active.name}'s ${op().active.status.join(', ')} was cured on bench!`, 'heal'); op().active.status = []; }
     op().bench.push(op().active);
     op().active = newActive;
     addLog(`${defender.name} was forced to switch!`, 'info');
@@ -913,7 +904,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const benchAllAtk = {...attack, baseDmg: v};
     [...p.bench, ...op().bench].forEach(pk => {
       const ownerNum = p.bench.includes(pk) ? G.currentPlayer : opp(G.currentPlayer);
-      const res = calcDamage(attacker, pk, benchAllAtk, attackerData.types);
+      const res = calcDamage(attacker, pk, benchAllAtk, attackerData.types, false);
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(pk, res.damage, ownerNum);
@@ -926,7 +917,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const v = parseInt(fx.split('oppBenchDmg:')[1]);
     const oppBenchAtk = {...attack, baseDmg: v};
     op().bench.forEach(pk => {
-      const res = calcDamage(attacker, pk, oppBenchAtk, attackerData.types);
+      const res = calcDamage(attacker, pk, oppBenchAtk, attackerData.types, false);
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
@@ -942,7 +933,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (allTargets.length > 0) {
       const sniperAttack = {...attack, baseDmg: v};
       G.targeting = { type:"sniperBench", validTargets:allTargets, callback:async function(tPk,tOwner){
-        const result = calcDamage(attacker, tPk, sniperAttack, attackerData.types);
+        const result = calcDamage(attacker, tPk, sniperAttack, attackerData.types, false);
         const targetSel = getPokemonSelector(tOwner, allTargets.find(t => t.pk === tPk)?.idx ?? -1);
         if (result.filtered) {
           addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
@@ -971,7 +962,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (p.bench.length > 0) {
       const target = p.bench[0];
       const sbAtk = {...attack, baseDmg: v};
-      const sbRes = calcDamage(attacker, target, sbAtk, attackerData.types);
+      const sbRes = calcDamage(attacker, target, sbAtk, attackerData.types, false);
       if (sbRes.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); }
       else if (sbRes.damage > 0) {
         dealDamage(target, sbRes.damage, G.currentPlayer);
@@ -1009,7 +1000,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx === 'madParty' && defender) {
     const totalPokemon = [p.active, ...p.bench, op().active, ...op().bench].filter(Boolean).length;
     const madAtk = {...attack, baseDmg: totalPokemon * 10};
-    const madResult = calcDamage(attacker, defender, madAtk, attackerData.types);
+    const madResult = calcDamage(attacker, defender, madAtk, attackerData.types, true);
     if (madResult.filtered) {
       addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
     } else if (madResult.damage > 0) {
@@ -1024,7 +1015,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx === 'finishingFang' && defender && defender.hp > 0) {
     if (defender.hp <= 120) {
       const fangAtk = {...attack, baseDmg: 60};
-      const fangResult = calcDamage(attacker, defender, fangAtk, attackerData.types);
+      const fangResult = calcDamage(attacker, defender, fangAtk, attackerData.types, true);
       if (fangResult.filtered) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (fangResult.damage > 0) {
@@ -1036,15 +1027,15 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   }
 
   // Hex Burn
-  if (fx === 'hexBurn' && defender && defender.hp > 0 && defender.status && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'burn';
+  if (fx === 'hexBurn' && defender && defender.hp > 0 && defender.status.length > 0 && !(defender.heldItem === 'Protect Goggles')) {
+    if (!defender.status.includes('burn')) defender.status.push('burn');
     addLog(`Hex Burn: ${defender.name} is now Burned!`, 'effect');
   }
 
   // Confusion Wave
   if (fx === 'confuseBoth') {
-    if (attacker.hp > 0 && !(attacker.heldItem === 'Protect Goggles')) { attacker.status = 'confusion'; addLog(`${attacker.name} is Confused!`, 'effect'); }
-    if (defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) { defender.status = 'confusion'; addLog(`${defender.name} is Confused!`, 'effect'); }
+    if (attacker.hp > 0 && !(attacker.heldItem === 'Protect Goggles') && !attacker.status.includes('confusion')) { attacker.status.push('confusion'); addLog(`${attacker.name} is Confused!`, 'effect'); }
+    if (defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('confusion')) { defender.status.push('confusion'); addLog(`${defender.name} is Confused!`, 'effect'); }
   }
 
   // Swarm Snipe — choose any target, 10 per your Pokémon, full damage calc
@@ -1060,7 +1051,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (validTargets.length > 0) {
       const swarmAttack = {...attack, baseDmg: swarmBaseDmg};
       G.targeting = { type:"swarmSnipe", validTargets:validTargets, callback:async function(tPk,tOwner){
-        const result = calcDamage(attacker, tPk, swarmAttack, attackerData.types);
+        const result = calcDamage(attacker, tPk, swarmAttack, attackerData.types, tPk === op().active);
         const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
         if (result.filtered) {
           addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
@@ -1092,7 +1083,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (attacker.energy >= threshold) {
       const condAtk = {...attack, baseDmg: dmg};
       op().bench.forEach(pk => {
-        const res = calcDamage(attacker, pk, condAtk, attackerData.types);
+        const res = calcDamage(attacker, pk, condAtk, attackerData.types, false);
         if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
         if (res.damage > 0) {
           const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
@@ -1111,7 +1102,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (attacker.energy >= energyCost) {
       attacker.energy -= energyCost;
       const boostAtk = {...attack, baseDmg: extraDmg};
-      const boostResult = calcDamage(attacker, defender, boostAtk, attackerData.types);
+      const boostResult = calcDamage(attacker, defender, boostAtk, attackerData.types, true);
       if (boostResult.filtered) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (boostResult.damage > 0) {
@@ -1144,7 +1135,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const targets = [op().active, ...op().bench].filter(Boolean).slice(0, count);
     const multiAtk = {...attack, baseDmg: dmg};
     targets.forEach(target => {
-      const res = calcDamage(attacker, target, multiAtk, attackerData.types);
+      const res = calcDamage(attacker, target, multiAtk, attackerData.types, target === op().active);
       if (res.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(target, res.damage, opp(G.currentPlayer));
@@ -1172,13 +1163,13 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
 
 // Status check before any attack — returns 'blocked', 'ended', or 'ok'
 async function checkStatusBeforeAttackClient(attacker) {
-  if (attacker.status === 'sleep') {
+  if (attacker.status.includes('sleep')) {
     addLog(`${attacker.name} is Asleep and can't attack!`, 'info');
     return 'blocked';
   }
-  if (attacker.status === 'confusion') {
+  if (attacker.status.includes('confusion')) {
     if (Math.random() < 0.5) {
-      attacker.status = null;
+      attacker.status = attacker.status.filter(s => s !== 'confusion');
       addLog(`${attacker.name} snapped out of Confusion! (Heads)`, 'info');
       return 'ok';
     } else {
@@ -1217,7 +1208,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
   const needsDmg = attack.baseDmg > 0 || fx.includes('berserk') || fx.includes('scaleDef') || fx.includes('scaleBoth') || fx.includes('scaleOwn') || fx.includes('scaleBench') || fx.includes('sustained') || fx.includes('bonusDmg') || fx.includes('fullHpBonus') || fx.includes('payback') || fx.includes('scaleDefNeg');
   if (!needsDmg || !defender) return;
 
-  const result = calcDamage(attacker, defender, attack, attackerTypes);
+  const result = calcDamage(attacker, defender, attack, attackerTypes, true);
 
   if (result.filtered) {
     addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
@@ -1247,7 +1238,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'burn';
+      if (!attacker.status.includes('burn')) attacker.status.push('burn');
       addLog(`Burn Scarf: 10 damage + Burn!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
       spawnParticlesAtEl("#youField .active-slot", '#EE8130', 10, {spread:40});
@@ -1255,7 +1246,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'poison';
+      if (!attacker.status.includes('poison')) attacker.status.push('poison');
       addLog(`Poison Barb: 10 damage + Poison!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
       spawnParticlesAtEl("#youField .active-slot", '#A33EA1', 10, {spread:40});
@@ -1263,7 +1254,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
     }
     if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'confusion';
+      if (!attacker.status.includes('confusion')) attacker.status.push('confusion');
       addLog(`Loud Bell: 10 damage + Confusion!`, 'effect');
       animateEl("#oppField .active-slot", "item-proc", 600);
       spawnParticlesAtEl("#youField .active-slot", '#eab308', 10, {spread:40});
@@ -1305,7 +1296,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
 // Shared snipe targeting callback
 function createSnipeCallback(attacker, attack, attackerTypes, fx, validTargets, p) {
   return async function(tPk, tOwner) {
-    const snipeResult = calcDamage(attacker, tPk, attack, attackerTypes);
+    const snipeResult = calcDamage(attacker, tPk, attack, attackerTypes, tPk === op().active);
     const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
     if (snipeResult.filtered) {
       addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
@@ -1362,7 +1353,9 @@ async function executeAttackClient(attacker, attack, attackerTypes, fx, p) {
   // Sustained + self-KO + endTurn
   attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-  await endTurn();
+  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+    await endTurn();
+  }
 }
 
 // ============================================================
@@ -1460,7 +1453,7 @@ function actionRetreat() {
   if (!p.active || p.bench.length === 0) return;
 
   // Sleep check - can't retreat while asleep
-  if (p.active.status === 'sleep') { addLog(`${p.active.name} is Asleep and can't retreat!`, 'info'); return; }
+  if (p.active.status.includes('sleep')) { addLog(`${p.active.name} is Asleep and can't retreat!`, 'info'); return; }
 
   // Blockade check
   const oppAll = [op().active, ...op().bench].filter(Boolean);
@@ -1479,7 +1472,7 @@ function actionQuickRetreat() {
   if (isOnline) { sendAction({ actionType: 'quickRetreat' }); return; }
   const p = cp();
   if (!p.active || p.bench.length === 0) return;
-  if (p.active.status === 'sleep') { addLog(`${p.active.name} is Asleep and can't retreat!`, 'info'); return; }
+  if (p.active.status.includes('sleep')) { addLog(`${p.active.name} is Asleep and can't retreat!`, 'info'); return; }
   const cost = p.active.heldItem === 'Float Stone' ? 1 : 2;
   if (p.active.energy < cost) return;
 
@@ -1515,7 +1508,7 @@ async function selectBenchForRetreat(idx) {
   if (p.active && p.active.hp > 0) {
     p.active.sustained = false;
     p.active.attackedThisTurn = false;
-    if (p.active.status) { addLog(`${p.active.name}'s ${p.active.status} was cured on bench!`, 'heal'); p.active.status = null; }
+    if (p.active.status.length > 0) { addLog(`${p.active.name}'s ${p.active.status.join(', ')} was cured on bench!`, 'heal'); p.active.status = []; }
     p.bench.push(p.active);
   }
   p.active = newActive;
@@ -1581,7 +1574,9 @@ async function finalizeAttack() {
   const attacker = p.active;
   if (attacker) attacker.attackedThisTurn = true;
   if (attacker && attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-  await endTurn();
+  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+    await endTurn();
+  }
 }
 
 // Copied attack (Mew Versatility / Ditto Improvise) - stored globally for reference
@@ -1756,10 +1751,10 @@ async function useAbility(key) {
   else if (key === 'lullaby') {
     // Kricketune: Confuse opponent's active
     if (!op().active) { addLog('No opponent active!', 'info'); renderBattle(); return; }
-    if (op().active.status) { addLog(`${op().active.name} already has a status!`, 'info'); renderBattle(); return; }
+    if (op().active.status.includes('confusion')) { addLog(`${op().active.name} is already Confused!`, 'info'); renderBattle(); return; }
     if (op().active.heldItem === 'Protect Goggles') { addLog(`${op().active.name}'s Protect Goggles block it!`, 'effect'); renderBattle(); return; }
     p.usedAbilities[key] = true;
-    op().active.status = 'confusion';
+    op().active.status.push('confusion');
     addLog(`Befuddling Melody confuses ${op().active.name}!`, 'effect');
     animateEl("#oppField .active-slot", "status-apply", 500);
     spawnParticlesAtEl("#oppField .active-slot", '#eab308', 10, {spread:40});
@@ -1793,7 +1788,7 @@ async function useAbility(key) {
       p.active.damage = Math.max(0, p.active.damage - 30);
       p.active.hp = p.active.maxHp - p.active.damage;
     }
-    p.active.status = null;
+    p.active.status = [];
     addLog(`Healing Touch: heal 20, clear status`, 'heal');
     // Don't mark as used - unlimited uses
   }
@@ -1814,10 +1809,10 @@ async function useAbility(key) {
   }
   else if (key === 'poisonFumes') {
     if (!op().active) { addLog('No opponent active!', 'info'); renderBattle(); return; }
-    if (op().active.status) { addLog(`${op().active.name} already has a status!`, 'info'); renderBattle(); return; }
+    if (op().active.status.includes('poison')) { addLog(`${op().active.name} is already Poisoned!`, 'info'); renderBattle(); return; }
     if (op().active.heldItem === 'Protect Goggles') { addLog(`${op().active.name}'s Protect Goggles block it!`, 'effect'); renderBattle(); return; }
     p.usedAbilities[key] = true;
-    op().active.status = 'poison';
+    op().active.status.push('poison');
     addLog(`Poison Fumes poisons ${op().active.name}!`, 'effect');
   }
   else if (key === 'hiddenPower') {
@@ -1837,6 +1832,7 @@ async function useAbility(key) {
       if (side.active && side.active.hp > 0) validTargets.push({player:pNum,idx:-1,pk:side.active});
       side.bench.forEach((pk,bi) => { if (pk.hp > 0) validTargets.push({player:pNum,idx:bi,pk:pk}); });
     });
+    if (validTargets.length === 0) { addLog('No valid targets!', 'info'); renderBattle(); return; }
     G.targeting = { type:"creepingChill", validTargets:validTargets, callback:function(tPk,tOwner){
       const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
       dealDamage(tPk, 10, tOwner);
@@ -1857,7 +1853,7 @@ async function useAbility(key) {
     p.usedAbilities[key] = true;
     // Force switch opponent - swap active with first bench
     const newActive = op().bench.shift();
-    if (op().active.status) { addLog(`${op().active.name}'s ${op().active.status} was cured on bench!`, 'heal'); op().active.status = null; }
+    if (op().active.status.length > 0) { addLog(`${op().active.name}'s ${op().active.status.join(', ')} was cured on bench!`, 'heal'); op().active.status = []; }
     op().bench.push(op().active);
     op().active = newActive;
     addLog(`Bloodthirsty: forced ${newActive.name} to become Active!`, 'effect');
@@ -2288,7 +2284,7 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   const targetClass = (isRetreatTarget || isTarget) ? 'targetable' : (slotClass === 'active-slot' && playerNum === meNum() ? 'clickable' : '');
 
   let statusHtml = '';
-  if (pk.status) statusHtml = `<span class="fp-status ${pk.status}">${pk.status.toUpperCase()}</span>`;
+  if (pk.status.length > 0) statusHtml = pk.status.map(s => `<span class="fp-status ${s}">${s.toUpperCase()}</span>`).join(' ');
 
   return `<div class="field-pokemon ${slotClass}">
     <div class="fp-img-wrap">
@@ -2327,7 +2323,7 @@ function renderActionPanel() {
     <div class="ap-pokemon-types">${data.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
     <div class="ap-pokemon-hp">HP: ${pk.hp}/${pk.maxHp} | Energy: ${pk.energy}/5 | Mana: ${me.mana}/10</div>
     ${pk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${pk.heldItem} <button onclick="discardHeldItem('active',null)" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button></div>` : ''}
-    ${pk.status ? `<div style="font-size:10px;color:#f59e0b">Status: ${pk.status}</div>` : ''}
+    ${pk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${pk.status.join(', ')}</div>` : ''}
   `;
 
   let html = '';
@@ -2360,7 +2356,7 @@ function renderActionPanel() {
     let cost = atk.energy;
     if (pk.quickClawActive) cost = Math.max(0, cost - 2);
     cost += thickAromaCost;
-    const canUse = pk.energy >= cost && pk.status !== 'sleep' && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
+    const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
     const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
     const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
     html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
@@ -2377,7 +2373,7 @@ function renderActionPanel() {
       bd.attacks.forEach((atk, atkIdx) => {
         const idx = copiedAttacks.length;
         copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
-        const canUse = pk.energy >= (atk.energy + thickAromaCost) && pk.status !== 'sleep';
+        const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
         const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
         const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
         html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
@@ -2395,7 +2391,7 @@ function renderActionPanel() {
     oppData.attacks.forEach((atk, atkIdx) => {
       const idx = copiedAttacks.length;
       copiedAttacks.push({ attack: atk, types: oppData.types, source: op().active.name, attackIndex: atkIdx });
-      const canUse = pk.energy >= (atk.energy + thickAromaCost) && pk.status !== 'sleep';
+      const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
       const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
       const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">

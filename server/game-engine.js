@@ -285,7 +285,7 @@ function makePokemon(name, heldItem) {
   return {
     name: name, maxHp: maxHp, hp: maxHp, energy: energy,
     heldItem: actualItem, heldItemUsed: heldItem === 'Power Herb',
-    status: null, damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
+    status: [], damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
     vulnerability: 0, quickClawActive: heldItem === 'Quick Claw',
     grassWeakUntil: 0, improviseActive: false,
   };
@@ -344,7 +344,7 @@ function calcWeaknessResistance(G, attackerTypes, defender) {
   return 1.0;
 }
 
-function calcDamage(G, attacker, defender, attack, attackerTypes) {
+function calcDamage(G, attacker, defender, attack, attackerTypes, isOppActive) {
   var baseDmg = attack.baseDmg;
   var fx = attack.fx || '';
 
@@ -361,16 +361,18 @@ function calcDamage(G, attacker, defender, attack, attackerTypes) {
 
   if (baseDmg <= 0) return { damage: 0, mult: 1 };
 
-  if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
-  if (attacker.heldItem === 'Life Orb') baseDmg += 30;
-
+  // Item damage bonuses only apply when hitting opponent's active
   var luckyProc = false;
-  if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
+  if (isOppActive) {
+    if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
+    if (attacker.heldItem === 'Life Orb') baseDmg += 30;
+    if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
+  }
 
   var ignoreRes = fx.indexOf('ignoreRes') >= 0;
   var mult = calcWeaknessResistance(G, attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
-  if (attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+  if (isOppActive && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
 
   var totalDmg = Math.floor(baseDmg * mult);
 
@@ -499,8 +501,8 @@ function startTurn(G) {
 
   // Lum Berry
   allPokemon.forEach(function(pk) {
-    if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status) {
-      pk.status = null;
+    if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status.length > 0) {
+      pk.status = [];
       pk.damage = Math.max(0, pk.damage - 30);
       pk.hp = pk.maxHp - pk.damage;
       pk.heldItemUsed = true;
@@ -531,15 +533,6 @@ function endTurn(G) {
     }
   });
 
-  // Leftovers for opponent
-  var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
-  oppAll.forEach(function(pk) {
-    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
-      pk.damage = Math.max(0, pk.damage - 10);
-      pk.hp = pk.maxHp - pk.damage;
-    }
-  });
-
   // Sustained tracking: copy attackedThisTurn into sustained, then clear it
   // This way sustained is only true if the pokemon attacked on THIS turn,
   // giving the bonus on the NEXT turn's attack only
@@ -560,7 +553,7 @@ function endTurn(G) {
     var ownerNum = entry.num;
 
     // Poison
-    if (pk.status === 'poison') {
+    if (pk.status.includes('poison')) {
       var ko = dealDamage(G, pk, 10, ownerNum);
       addLog(G, 'Poison deals 10 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', targetPlayer: ownerNum, targetIdx: -1, status: 'poison', damage: 10 });
@@ -568,24 +561,24 @@ function endTurn(G) {
     }
 
     // Burn
-    if (pk.status === 'burn') {
+    if (pk.status.includes('burn')) {
       var ko2 = dealDamage(G, pk, 20, ownerNum);
       addLog(G, 'Burn deals 20 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', targetPlayer: ownerNum, targetIdx: -1, status: 'burn', damage: 20 });
       if (ko2) handleKO(G, pk, ownerNum);
-      if (pk && pk.status === 'burn' && Math.random() < 0.5) {
-        pk.status = null;
+      if (pk && pk.status.includes('burn') && Math.random() < 0.5) {
+        pk.status = pk.status.filter(function(s) { return s !== 'burn'; });
         addLog(G, pk.name + '\'s burn healed! (Heads)', 'heal');
         G.events.push({ type: 'status_cure', targetPlayer: ownerNum, targetIdx: -1 });
-      } else if (pk && pk.status === 'burn') {
+      } else if (pk && pk.status.includes('burn')) {
         addLog(G, pk.name + ' is still Burned (Tails)', 'info');
       }
     }
 
     // Sleep
-    if (pk.status === 'sleep') {
+    if (pk.status.includes('sleep')) {
       if (Math.random() < 0.5) {
-        pk.status = null;
+        pk.status = pk.status.filter(function(s) { return s !== 'sleep'; });
         addLog(G, pk.name + ' woke up! (Heads)', 'info');
         G.events.push({ type: 'status_cure', targetPlayer: ownerNum, targetIdx: -1 });
       } else {
@@ -610,18 +603,18 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   var p = cp(G);
 
   // Status effects
-  if (fx.indexOf('poison') >= 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'poison';
+  if (fx.indexOf('poison') >= 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('poison')) {
+    defender.status.push('poison');
     addLog(G, defender.name + ' is Poisoned!', 'effect');
     G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'poison' });
   }
-  if (fx.indexOf('burn') >= 0 && fx.indexOf('hexBurn') < 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'burn';
+  if (fx.indexOf('burn') >= 0 && fx.indexOf('hexBurn') < 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('burn')) {
+    defender.status.push('burn');
     addLog(G, defender.name + ' is Burned!', 'effect');
     G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'burn' });
   }
-  if (fx.indexOf('sleep') >= 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'sleep';
+  if (fx.indexOf('sleep') >= 0 && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('sleep')) {
+    defender.status.push('sleep');
     addLog(G, defender.name + ' fell Asleep!', 'effect');
     G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'sleep' });
   }
@@ -641,11 +634,11 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     addLog(G, 'Stripped ' + actual + ' energy from ' + defender.name, 'effect');
   }
 
-  // Self damage
+  // Self damage (no item bonuses since not hitting opp active)
   if (fx.indexOf('selfDmg:') >= 0) {
     var sv = parseInt(fx.split('selfDmg:')[1]);
     var selfAtk = Object.assign({}, attack, { baseDmg: sv });
-    var selfRes = calcDamage(G, attacker, attacker, selfAtk, attackerData.types);
+    var selfRes = calcDamage(G, attacker, attacker, selfAtk, attackerData.types, false);
     if (selfRes.filtered) { addLog(G, attacker.name + '\'s Filter blocks the recoil!', 'effect'); }
     else if (selfRes.damage > 0) { dealDamage(G, attacker, selfRes.damage, G.currentPlayer); }
   }
@@ -661,7 +654,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
 
   if (fx.indexOf('selfShield:') >= 0) { attacker.shields.push(parseInt(fx.split('selfShield:')[1])); }
   if (fx.indexOf('selfVuln:') >= 0) { attacker.vulnerability = parseInt(fx.split('selfVuln:')[1]); }
-  if (fx.indexOf('selfSleep') >= 0) { attacker.status = 'sleep'; addLog(G, attacker.name + ' fell asleep!', 'effect'); }
+  if (fx.indexOf('selfSleep') >= 0 && !attacker.status.includes('sleep')) { attacker.status.push('sleep'); addLog(G, attacker.name + ' fell asleep!', 'effect'); }
 
   // Self retreat
   if (fx.indexOf('selfRetreat') >= 0 && p.bench.length > 0) {
@@ -672,7 +665,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   // Force switch opponent
   if (fx.indexOf('forceSwitch') >= 0 && op(G).bench.length > 0 && defender && defender.hp > 0) {
     var newActive = op(G).bench.shift();
-    if (op(G).active.status) { addLog(G, op(G).active.name + '\'s ' + op(G).active.status + ' was cured on bench!', 'heal'); op(G).active.status = null; }
+    if (op(G).active.status.length > 0) { addLog(G, op(G).active.name + '\'s ' + op(G).active.status.join(', ') + ' was cured on bench!', 'heal'); op(G).active.status = []; }
     op(G).bench.push(op(G).active);
     op(G).active = newActive;
     addLog(G, defender.name + ' was forced to switch!', 'info');
@@ -685,7 +678,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var benchAllAtk = Object.assign({}, attack, { baseDmg: bav });
     p.bench.concat(op(G).bench).forEach(function(bpk) {
       var ownerNum = p.bench.indexOf(bpk) >= 0 ? G.currentPlayer : oppPlayer(G.currentPlayer);
-      var res = calcDamage(G, attacker, bpk, benchAllAtk, attackerData.types);
+      var res = calcDamage(G, attacker, bpk, benchAllAtk, attackerData.types, false);
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, ownerNum);
@@ -698,7 +691,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var obv = parseInt(fx.split('oppBenchDmg:')[1]);
     var oppBenchAtk = Object.assign({}, attack, { baseDmg: obv });
     op(G).bench.slice().forEach(function(bpk) {
-      var res = calcDamage(G, attacker, bpk, oppBenchAtk, attackerData.types);
+      var res = calcDamage(G, attacker, bpk, oppBenchAtk, attackerData.types, false);
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
@@ -728,7 +721,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (p.bench.length > 0) {
       var sbTarget = p.bench[0];
       var sbAtk = Object.assign({}, attack, { baseDmg: sbdv });
-      var sbRes = calcDamage(G, attacker, sbTarget, sbAtk, attackerData.types);
+      var sbRes = calcDamage(G, attacker, sbTarget, sbAtk, attackerData.types, false);
       if (sbRes.filtered) { addLog(G, sbTarget.name + '\'s Filter blocks the damage!', 'effect'); }
       else if (sbRes.damage > 0) {
         dealDamage(G, sbTarget, sbRes.damage, G.currentPlayer);
@@ -763,7 +756,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   if (fx === 'madParty' && defender) {
     var totalPokemon = [p.active].concat(p.bench).concat([op(G).active]).concat(op(G).bench).filter(Boolean).length;
     var madAtk = Object.assign({}, attack, { baseDmg: totalPokemon * 10 });
-    var madResult = calcDamage(G, attacker, defender, madAtk, attackerData.types);
+    var madResult = calcDamage(G, attacker, defender, madAtk, attackerData.types, true);
     if (madResult.filtered) {
       addLog(G, defender.name + '\'s Filter blocks the damage!', 'effect');
     } else if (madResult.damage > 0) {
@@ -777,7 +770,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   // Finishing Fang
   if (fx === 'finishingFang' && defender && defender.hp > 0 && defender.hp <= 120) {
     var fangAtk = Object.assign({}, attack, { baseDmg: 60 });
-    var fangResult = calcDamage(G, attacker, defender, fangAtk, attackerData.types);
+    var fangResult = calcDamage(G, attacker, defender, fangAtk, attackerData.types, true);
     if (fangResult.filtered) {
       addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
     } else if (fangResult.damage > 0) {
@@ -788,15 +781,15 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   }
 
   // Hex Burn
-  if (fx === 'hexBurn' && defender && defender.hp > 0 && defender.status && !(defender.heldItem === 'Protect Goggles')) {
-    defender.status = 'burn';
+  if (fx === 'hexBurn' && defender && defender.hp > 0 && defender.status.length > 0 && !(defender.heldItem === 'Protect Goggles')) {
+    if (!defender.status.includes('burn')) defender.status.push('burn');
     addLog(G, 'Hex Burn: ' + defender.name + ' is now Burned!', 'effect');
   }
 
   // Confusion Wave
   if (fx === 'confuseBoth') {
-    if (attacker.hp > 0 && !(attacker.heldItem === 'Protect Goggles')) { attacker.status = 'confusion'; addLog(G, attacker.name + ' is Confused!', 'effect'); }
-    if (defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) { defender.status = 'confusion'; addLog(G, defender.name + ' is Confused!', 'effect'); }
+    if (attacker.hp > 0 && !(attacker.heldItem === 'Protect Goggles') && !attacker.status.includes('confusion')) { attacker.status.push('confusion'); addLog(G, attacker.name + ' is Confused!', 'effect'); }
+    if (defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles') && !defender.status.includes('confusion')) { defender.status.push('confusion'); addLog(G, defender.name + ' is Confused!', 'effect'); }
   }
 
   // Swarm Snipe targeting
@@ -827,7 +820,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (attacker.energy >= threshold) {
       var condAtk = Object.assign({}, attack, { baseDmg: cbDmg });
       op(G).bench.slice().forEach(function(bpk) {
-        var res = calcDamage(G, attacker, bpk, condAtk, attackerData.types);
+        var res = calcDamage(G, attacker, bpk, condAtk, attackerData.types, false);
         if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
         if (res.damage > 0) {
           var cbko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
@@ -846,7 +839,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (attacker.energy >= energyCost) {
       attacker.energy -= energyCost;
       var boostAtk = Object.assign({}, attack, { baseDmg: extraDmg });
-      var boostResult = calcDamage(G, attacker, defender, boostAtk, attackerData.types);
+      var boostResult = calcDamage(G, attacker, defender, boostAtk, attackerData.types, true);
       if (boostResult.filtered) {
         addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
       } else if (boostResult.damage > 0) {
@@ -877,7 +870,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var mtTargets = [op(G).active].concat(op(G).bench).filter(Boolean).slice(0, mtCount);
     var multiAtk = Object.assign({}, attack, { baseDmg: mtDmg });
     mtTargets.forEach(function(mtTarget) {
-      var res = calcDamage(G, attacker, mtTarget, multiAtk, attackerData.types);
+      var res = calcDamage(G, attacker, mtTarget, multiAtk, attackerData.types, mtTarget === op(G).active);
       if (res.filtered) { addLog(G, mtTarget.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var mtko = dealDamage(G, mtTarget, res.damage, oppPlayer(G.currentPlayer));
@@ -935,7 +928,7 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
 
   if (!needsDmg) return false;
 
-  var result = calcDamage(G, attacker, defender, attack, attackerTypes);
+  var result = calcDamage(G, attacker, defender, attack, attackerTypes, true);
   var ko = false;
 
   if (result.filtered) {
@@ -956,17 +949,17 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
     }
     if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(G, attacker, 10, G.currentPlayer);
-      attacker.status = 'burn';
+      if (!attacker.status.includes('burn')) attacker.status.push('burn');
       addLog(G, 'Burn Scarf: 10 damage + Burn!', 'effect');
     }
     if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(G, attacker, 10, G.currentPlayer);
-      attacker.status = 'poison';
+      if (!attacker.status.includes('poison')) attacker.status.push('poison');
       addLog(G, 'Poison Barb: 10 damage + Poison!', 'effect');
     }
     if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
       dealDamage(G, attacker, 10, G.currentPlayer);
-      attacker.status = 'confusion';
+      if (!attacker.status.includes('confusion')) attacker.status.push('confusion');
       addLog(G, 'Loud Bell: 10 damage + Confusion!', 'effect');
     }
 
@@ -995,13 +988,13 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
 
 // Shared status check before any attack (regular or copied)
 function checkStatusBeforeAttack(G, attacker) {
-  if (attacker.status === 'sleep') {
+  if (attacker.status.includes('sleep')) {
     addLog(G, attacker.name + ' is Asleep and can\'t attack!', 'info');
     return 'blocked';
   }
-  if (attacker.status === 'confusion') {
+  if (attacker.status.includes('confusion')) {
     if (Math.random() < 0.5) {
-      attacker.status = null;
+      attacker.status = attacker.status.filter(function(s) { return s !== 'confusion'; });
       addLog(G, attacker.name + ' snapped out of Confusion! (Heads)', 'info');
       return 'ok';
     } else {
@@ -1171,7 +1164,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   var attackerTypes = ctx.attackerTypes || attackerData.types;
 
   if (tType === 'snipe') {
-    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes);
+    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPk === op(G).active);
     if (snipeResult.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (snipeResult.damage > 0) {
@@ -1189,7 +1182,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var fxResult = processAttackFx(G, ctx.fx, attacker, targetPk, ctx.attack, attackerTypes);
     if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
   } else if (tType === 'sniperBench' || tType === 'swarmSnipe') {
-    var result = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes);
+    var result = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPk === op(G).active);
     if (result.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (result.damage > 0) {
@@ -1224,8 +1217,8 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     G.events.push({ type: 'energy_gain', targetPlayer: targetPlayer, targetSlot: 'bench', benchIdx: targetBenchIdx });
     return true; // No endTurn for abilities
   } else if (tType === 'poisonFumes') {
-    if (!targetPk.status && !(targetPk.heldItem === 'Protect Goggles')) {
-      targetPk.status = 'poison';
+    if (!targetPk.status.includes('poison') && !(targetPk.heldItem === 'Protect Goggles')) {
+      targetPk.status.push('poison');
       cp(G).usedAbilities['poisonFumes'] = true;
       addLog(G, 'Poison Fumes poisons ' + targetPk.name + '!', 'effect');
       G.events.push({ type: 'status_apply', targetPlayer: targetPlayer, targetIdx: targetBenchIdx, status: 'poison' });
@@ -1249,7 +1242,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
 function doRetreat(G) {
   var p = cp(G);
   if (!p.active || p.bench.length === 0) return false;
-  if (p.active.status === 'sleep') { addLog(G, p.active.name + ' is Asleep and can\'t retreat!', 'info'); return false; }
+  if (p.active.status.includes('sleep')) { addLog(G, p.active.name + ' is Asleep and can\'t retreat!', 'info'); return false; }
 
   var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
   var blocked = oppAll.some(function(pk) { return getPokemonData(pk.name).ability && getPokemonData(pk.name).ability.key === 'blockade' && pk === op(G).active && !isPassiveBlocked(G); });
@@ -1265,7 +1258,7 @@ function doRetreat(G) {
 function doQuickRetreat(G) {
   var p = cp(G);
   if (!p.active || p.bench.length === 0) return false;
-  if (p.active.status === 'sleep') { addLog(G, p.active.name + ' is Asleep and can\'t retreat!', 'info'); return false; }
+  if (p.active.status.includes('sleep')) { addLog(G, p.active.name + ' is Asleep and can\'t retreat!', 'info'); return false; }
   var cost = p.active.heldItem === 'Float Stone' ? 1 : 2;
   if (p.active.energy < cost) return false;
 
@@ -1294,7 +1287,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   if (p.active && p.active.hp > 0) {
     p.active.sustained = false;
     p.active.attackedThisTurn = false;
-    if (p.active.status) { addLog(G, p.active.name + '\'s ' + p.active.status + ' was cured on bench!', 'heal'); p.active.status = null; }
+    if (p.active.status.length > 0) { addLog(G, p.active.name + '\'s ' + p.active.status.join(', ') + ' was cured on bench!', 'heal'); p.active.status = []; }
     p.bench.push(p.active);
   }
   p.active = newActive;
@@ -1418,10 +1411,10 @@ function doUseAbility(G, key) {
   }
   else if (key === 'lullaby') {
     if (!op(G).active) { addLog(G, 'No opponent active!', 'info'); return false; }
-    if (op(G).active.status) { addLog(G, op(G).active.name + ' already has a status!', 'info'); return false; }
+    if (op(G).active.status.includes('confusion')) { addLog(G, op(G).active.name + ' is already Confused!', 'info'); return false; }
     if (op(G).active.heldItem === 'Protect Goggles') { addLog(G, op(G).active.name + '\'s Protect Goggles block it!', 'effect'); return false; }
     p.usedAbilities[key] = true;
-    op(G).active.status = 'confusion';
+    op(G).active.status.push('confusion');
     addLog(G, 'Befuddling Melody confuses ' + op(G).active.name + '!', 'effect');
     G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'confusion' });
   }
@@ -1445,7 +1438,7 @@ function doUseAbility(G, key) {
       p.active.damage = Math.max(0, p.active.damage - 30);
       p.active.hp = p.active.maxHp - p.active.damage;
     }
-    p.active.status = null;
+    p.active.status = [];
     addLog(G, 'Healing Touch: heal 30, clear status', 'heal');
   }
   else if (key === 'yummyDelivery') {
@@ -1458,10 +1451,10 @@ function doUseAbility(G, key) {
   }
   else if (key === 'poisonFumes') {
     if (!op(G).active) { addLog(G, 'No opponent active!', 'info'); return false; }
-    if (op(G).active.status) { addLog(G, op(G).active.name + ' already has a status!', 'info'); return false; }
+    if (op(G).active.status.includes('poison')) { addLog(G, op(G).active.name + ' is already Poisoned!', 'info'); return false; }
     if (op(G).active.heldItem === 'Protect Goggles') { addLog(G, op(G).active.name + '\'s Protect Goggles block it!', 'effect'); return false; }
     p.usedAbilities[key] = true;
-    op(G).active.status = 'poison';
+    op(G).active.status.push('poison');
     addLog(G, 'Poison Fumes poisons ' + op(G).active.name + '!', 'effect');
     G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'poison' });
   }
@@ -1477,6 +1470,7 @@ function doUseAbility(G, key) {
   }
   else if (key === 'creepingChill') {
     var ccTargets = getAllValidTargets(G);
+    if (ccTargets.length === 0) { addLog(G, 'No valid targets!', 'info'); return false; }
     G.targeting = { type: 'creepingChill', validTargets: ccTargets, context: {} };
     return true;
   }
@@ -1486,7 +1480,7 @@ function doUseAbility(G, key) {
     p.mana--;
     p.usedAbilities[key] = true;
     var btNewActive = op(G).bench.shift();
-    if (op(G).active.status) { addLog(G, op(G).active.name + '\'s ' + op(G).active.status + ' was cured on bench!', 'heal'); op(G).active.status = null; }
+    if (op(G).active.status.length > 0) { addLog(G, op(G).active.name + '\'s ' + op(G).active.status.join(', ') + ' was cured on bench!', 'heal'); op(G).active.status = []; }
     op(G).bench.push(op(G).active);
     op(G).active = btNewActive;
     addLog(G, 'Bloodthirsty: forced ' + btNewActive.name + ' to become Active!', 'effect');
