@@ -123,6 +123,9 @@ const POKEMON_DB = [
   {name:"Obstagoon",types:["Dark","Normal"],cost:4,hp:230,weakness:["Fairy"],resistance:["Ghost","Dark"],
     ability:{name:"Blockade",desc:"Opp Active can't retreat",type:"passive",key:"blockade"},
     attacks:[{name:"Obstruct",energy:3,baseDmg:50,desc:"Strip 1 energy",fx:"stripEnergy:1"}]},
+  {name:"Oinkologne",types:["Normal"],cost:4,hp:240,weakness:[],resistance:["Ghost"],
+    ability:{name:"Thick Aroma",desc:"Opp attacks cost +1 energy",type:"passive",key:"thickAroma"},
+    attacks:[{name:"Heavy Stomp",energy:3,baseDmg:80,desc:"",fx:""}]},
   {name:"Pichu",types:["Electric"],cost:1,hp:80,weakness:["Ground"],resistance:["Steel"],
     attacks:[{name:"Sparky Generator",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
   {name:"Raikou",types:["Electric"],cost:5,hp:240,weakness:["Ground"],resistance:["Steel"],
@@ -1021,6 +1024,12 @@ function doAttack(G, attackIndex, action) {
   if (!attack) return false;
   var energyCost = attack.energy;
   if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
+  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
+  var oppActive = op(G).active;
+  if (oppActive && !isPassiveBlocked(G)) {
+    var oppData = getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
+  }
   if (attacker.energy < energyCost) return false;
 
   if (attacker.cantUseAttack === attack.name) {
@@ -1112,7 +1121,14 @@ function doCopiedAttack(G, sourceName, attackIndex, action) {
     }
   }
 
-  if (attacker.energy < attack.energy) return false;
+  var copiedEnergyCost = attack.energy;
+  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
+  var oppActiveC = op(G).active;
+  if (oppActiveC && !isPassiveBlocked(G)) {
+    var oppDataC = getPokemonData(oppActiveC.name);
+    if (oppDataC.ability && oppDataC.ability.key === 'thickAroma') copiedEnergyCost += 1;
+  }
+  if (attacker.energy < copiedEnergyCost) return false;
 
   var defender = op(G).active;
   var fx = attack.fx || '';

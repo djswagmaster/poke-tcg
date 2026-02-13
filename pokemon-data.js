@@ -57,6 +57,7 @@ window.POKEMON_DATA = [
   { name: "Mismagius",          types: ["Ghost"],                 cost: 4, hp: 200, weakness: ["Ghost"],                 resistance: ["Normal"] },
   { name: "Muk",                types: ["Poison"],                cost: 4, hp: 250, weakness: ["Psychic"],               resistance: ["Bug"] },
   { name: "Obstagoon",          types: ["Dark", "Normal"],        cost: 4, hp: 230, weakness: ["Fairy"],                 resistance: ["Ghost", "Dark"] },
+  { name: "Oinkologne",        types: ["Normal"],                cost: 4, hp: 240, weakness: [],                        resistance: ["Ghost"] },
   { name: "Pichu",              types: ["Electric"],              cost: 1, hp:  80, weakness: ["Ground"],                resistance: ["Steel"] },
   { name: "Psyduck",            types: ["Water"],                 cost: 2, hp: 140, weakness: ["Electric"],              resistance: ["Fire"] },
   { name: "Raikou",             types: ["Electric"],              cost: 5, hp: 240, weakness: ["Ground"],                resistance: ["Steel"] },

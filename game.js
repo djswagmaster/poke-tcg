@@ -135,6 +135,9 @@ const POKEMON_DB = [
   {name:"Obstagoon",types:["Dark","Normal"],cost:4,hp:230,weakness:["Fairy"],resistance:["Ghost","Dark"],
     ability:{name:"Blockade",desc:"Opp Active can't retreat",type:"passive",key:"blockade"},
     attacks:[{name:"Obstruct",energy:3,baseDmg:50,desc:"Strip 1 energy",fx:"stripEnergy:1"}]},
+  {name:"Oinkologne",types:["Normal"],cost:4,hp:240,weakness:[],resistance:["Ghost"],
+    ability:{name:"Thick Aroma",desc:"Opp attacks cost +1 energy",type:"passive",key:"thickAroma"},
+    attacks:[{name:"Heavy Stomp",energy:3,baseDmg:80,desc:"",fx:""}]},
   {name:"Pichu",types:["Electric"],cost:1,hp:80,weakness:["Ground"],resistance:["Steel"],
     attacks:[{name:"Sparky Generator",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
   {name:"Raikou",types:["Electric"],cost:5,hp:240,weakness:["Ground"],resistance:["Steel"],
@@ -1232,6 +1235,12 @@ async function actionAttack(attackIndex) {
 
   let energyCost = attack.energy;
   if (attacker.quickClawActive) { energyCost = Math.max(0, energyCost - 2); }
+  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
+  const oppActiveTA = op().active;
+  if (oppActiveTA && !isPassiveBlocked()) {
+    const oppDataTA = getPokemonData(oppActiveTA.name);
+    if (oppDataTA.ability && oppDataTA.ability.key === 'thickAroma') energyCost += 1;
+  }
   if (attacker.energy < energyCost) return;
 
   // Locked attack check
@@ -1584,7 +1593,14 @@ async function actionCopiedAttack(copiedIdx) {
   }
 
   // Energy check - copied attacks use attacker's energy
-  if (attacker.energy < attack.energy) { G.animating = false; return; }
+  let copiedEnergyCost = attack.energy;
+  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
+  const oppActiveCA = op().active;
+  if (oppActiveCA && !isPassiveBlocked()) {
+    const oppDataCA = getPokemonData(oppActiveCA.name);
+    if (oppDataCA.ability && oppDataCA.ability.key === 'thickAroma') copiedEnergyCost += 1;
+  }
+  if (attacker.energy < copiedEnergyCost) { G.animating = false; return; }
 
   const defender = op().active;
   const fx = attack.fx || '';
@@ -2460,16 +2476,26 @@ function renderActionPanel() {
     return;
   }
 
+  // Check if opponent's Active has Thick Aroma (increases our attack energy cost by 1)
+  let thickAromaCost = 0;
+  const them = isOnline ? G.players[isOnline ? (myPlayerNum === 1 ? 2 : 1) : opp(G.currentPlayer)] : op();
+  if (them.active && !isPassiveBlocked()) {
+    const themData = getPokemonData(them.active.name);
+    if (themData.ability && themData.ability.key === 'thickAroma') thickAromaCost = 1;
+  }
+
   // Attacks
   html += '<div class="ap-section-label">ATTACKS</div>';
   data.attacks.forEach((atk, i) => {
     let cost = atk.energy;
     if (pk.quickClawActive) cost = Math.max(0, cost - 2);
+    cost += thickAromaCost;
     const canUse = pk.energy >= cost && pk.status !== 'sleep' && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
     const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+    const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
     html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
       <span class="atk-name">${atk.name}${dmgLabel}</span>
-      <span class="atk-detail">${atk.energy}⚡${atk.desc ? ' | ' + atk.desc : ''}</span>
+      <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
     </button>`;
   });
 
@@ -2481,11 +2507,12 @@ function renderActionPanel() {
       bd.attacks.forEach((atk, atkIdx) => {
         const idx = copiedAttacks.length;
         copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
-        const canUse = pk.energy >= atk.energy && pk.status !== 'sleep';
+        const canUse = pk.energy >= (atk.energy + thickAromaCost) && pk.status !== 'sleep';
         const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+        const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
         html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
           <span class="atk-name">${atk.name}${cdmg}</span>
-          <span class="atk-detail">${atk.energy}⚡ | from ${benchPk.name}</span>
+          <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
         </button>`;
       });
     });
@@ -2498,11 +2525,12 @@ function renderActionPanel() {
     oppData.attacks.forEach((atk, atkIdx) => {
       const idx = copiedAttacks.length;
       copiedAttacks.push({ attack: atk, types: oppData.types, source: op().active.name, attackIndex: atkIdx });
-      const canUse = pk.energy >= atk.energy && pk.status !== 'sleep';
+      const canUse = pk.energy >= (atk.energy + thickAromaCost) && pk.status !== 'sleep';
       const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+      const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
         <span class="atk-name">${atk.name}${cdmg2}</span>
-        <span class="atk-detail">${atk.energy}⚡ | from ${op().active.name}</span>
+        <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
       </button>`;
     });
   }
