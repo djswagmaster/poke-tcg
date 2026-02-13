@@ -1511,7 +1511,10 @@ async function selectBenchForRetreat(idx) {
 
   if (reason === 'retreat') {
   await endTurn();
-  } else if (reason === 'quick' || reason === 'ko') {
+  } else if (reason === 'ko') {
+    renderBattle();
+    await endTurn();
+  } else if (reason === 'quick') {
     renderBattle();
     if (afterEnd) await endTurn();
   } else if (reason === 'forced' || reason === 'batonPass') {
@@ -2320,7 +2323,14 @@ function renderBattle() {
   document.getElementById('btP2Name').textContent = G.players[2].name;
   document.getElementById('btP1Mana').textContent = G.players[1].mana + '⬡';
   document.getElementById('btP2Mana').textContent = G.players[2].mana + '⬡';
-  document.getElementById('btTurn').textContent = `Turn ${G.turn} — ${cp().name}${isOnline && !isMyTurn() ? ' (Waiting...)' : ''}`;
+  let turnText = `Turn ${G.turn} — ${cp().name}`;
+  if (G.pendingRetreat && G.pendingRetreat.reason === 'ko') {
+    const prPlayer = G.players[G.pendingRetreat.player];
+    turnText = `Turn ${G.turn} — ${prPlayer.name} must choose new Active`;
+  } else if (isOnline && !isMyTurn()) {
+    turnText += ' (Waiting...)';
+  }
+  document.getElementById('btTurn').textContent = turnText;
 
   for (let p = 1; p <= 2; p++) {
     const kosEl = document.getElementById(`btP${p}Kos`);
@@ -2401,7 +2411,8 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
 function renderActionPanel() {
   const panel = document.getElementById('apActions');
   const myPendingRetreat = G.pendingRetreat && G.pendingRetreat.player === myPlayerNum;
-  if (isOnline && !isMyTurn() && !myPendingRetreat) {
+  const oppPendingRetreat = isOnline && G.pendingRetreat && G.pendingRetreat.player !== myPlayerNum;
+  if (isOnline && ((!isMyTurn() && !myPendingRetreat) || oppPendingRetreat)) {
     panel.innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
     return;
   }
@@ -2778,9 +2789,7 @@ function handleServerMessage(msg) {
   }
 }
 
-function handleGameState(state, events) {
-  // Update local G from server state
-  const prevPhase = G.phase;
+function applyServerState(state) {
   G.phase = state.phase;
   G.currentPlayer = state.currentPlayer;
   G.turn = state.turn;
@@ -2789,7 +2798,6 @@ function handleGameState(state, events) {
   G.pendingRetreat = state.pendingRetreat || null;
   G.winner = state.winner || null;
 
-  // Update players
   for (let pNum = 1; pNum <= 2; pNum++) {
     const sp = state.players[pNum];
     G.players[pNum].name = sp.name;
@@ -2799,7 +2807,6 @@ function handleGameState(state, events) {
     G.players[pNum].bench = sp.bench || [];
     G.players[pNum].usedAbilities = sp.usedAbilities || {};
     G.players[pNum].ready = sp.ready || false;
-    // Hand: own player gets full data, opponent gets empty array (count in handCount)
     if (pNum === myPlayerNum) {
       G.players[pNum].hand = sp.hand || [];
       G.players[pNum].deck = sp.deck || [];
@@ -2810,7 +2817,6 @@ function handleGameState(state, events) {
     }
   }
 
-  // Copied attacks from server
   if (state.copiedAttacks) {
     copiedAttacks = state.copiedAttacks.map((ca, i) => ({
       attack: ca.attack,
@@ -2821,26 +2827,39 @@ function handleGameState(state, events) {
   }
 
   G.animating = false;
+}
+
+function handleGameState(state, events) {
+  const prevPhase = G.phase;
 
   // Handle phase transitions
   if (state.phase === 'deckBuild') {
+    applyServerState(state);
     showScreen('deckBuildScreen');
     document.getElementById('dbPlayerTag').textContent = G.players[myPlayerNum].name;
     renderDeckBuild();
   } else if (state.phase === 'setupActive' || state.phase === 'setupBench') {
+    applyServerState(state);
     showOnlineSetupScreen(state.phase);
   } else if (state.phase === 'battle') {
     showScreen('battleScreen');
-    // Replay events then render
     if (events.length > 0) {
+      // Defer full state update until after event replay so animations
+      // (like ko-fall) can render against the pre-event DOM state.
+      // Only update log so new log entries appear during replay.
+      G.log = state.log || [];
       replayEvents(events).then(() => {
+        applyServerState(state);
         renderBattle();
         if (G.winner) showWin(G.winner);
       });
     } else {
+      applyServerState(state);
       renderBattle();
       if (G.winner) showWin(G.winner);
     }
+  } else {
+    applyServerState(state);
   }
 }
 
@@ -2865,6 +2884,13 @@ async function replayEvents(events) {
         animateEl(dmgSel, getShakeClass(event.amount), getShakeDuration(event.amount));
         const attackColor = '#ef4444';
         spawnParticlesAtEl(dmgSel, attackColor, event.amount >= 100 ? 22 : 14, {spread: event.amount >= 100 ? 75 : 55});
+        // Apply damage to local state so HP bars update during replay
+        const dmgOwner = G.players[event.targetPlayer];
+        const dmgTarget = event.targetIdx === -1 ? dmgOwner.active : dmgOwner.bench[event.targetIdx];
+        if (dmgTarget) {
+          dmgTarget.damage = (dmgTarget.damage || 0) + event.amount;
+          dmgTarget.hp = Math.max(0, dmgTarget.maxHp - dmgTarget.damage);
+        }
         renderBattle();
         await delay(event.amount >= 100 ? 1200 : event.amount >= 50 ? 900 : 700);
         break;
@@ -2874,6 +2900,13 @@ async function replayEvents(events) {
         animateEl(koSel, 'ko-fall', 600);
         spawnParticlesAtEl(koSel, '#ef4444', 20, {spread:70, size:4});
         await delay(600);
+        // Remove the KO'd pokemon from local state so re-render shows it gone
+        const koOwner = G.players[event.targetPlayer];
+        if (event.targetIdx === -1) {
+          koOwner.active = null;
+        } else {
+          koOwner.bench.splice(event.targetIdx, 1);
+        }
         renderBattle();
         await delay(400);
         break;
@@ -2899,6 +2932,15 @@ async function replayEvents(events) {
         const tickColors = { poison: '#A33EA1', burn: '#EE8130' };
         spawnParticlesAtEl(tickSel, tickColors[event.status] || '#fff', 10, {spread:40, size:5});
         animateEl(tickSel, 'status-apply', 500);
+        // Apply status damage to local state
+        if (event.damage) {
+          const tickOwner = G.players[event.targetPlayer];
+          const tickTarget = event.targetIdx === -1 ? tickOwner.active : tickOwner.bench[event.targetIdx];
+          if (tickTarget) {
+            tickTarget.damage = (tickTarget.damage || 0) + event.damage;
+            tickTarget.hp = Math.max(0, tickTarget.maxHp - tickTarget.damage);
+          }
+        }
         renderBattle();
         await delay(600);
         break;

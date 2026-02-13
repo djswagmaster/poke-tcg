@@ -1315,6 +1315,8 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
 
   if (reason === 'retreat') {
     endTurn(G);
+  } else if (reason === 'ko') {
+    endTurn(G);
   } else if (afterEnd) {
     endTurn(G);
   }
