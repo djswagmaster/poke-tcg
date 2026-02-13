@@ -175,7 +175,7 @@ const POKEMON_DB = [
     ability:{name:"Ancient Energy",desc:"Active +1 energy, turn ends",type:"active",key:"hiddenPower"},
     attacks:[{name:"Psy Pulse",energy:1,baseDmg:40,desc:"",fx:""}]},
   {name:"Vileplume",types:["Grass","Poison"],cost:4,hp:200,weakness:["Ground"],resistance:["Water"],
-    ability:{name:"Poison Fumes",desc:"Opp Active is Poisoned",type:"passive",key:"pollenHazard"},
+    ability:{name:"Poison Fumes",desc:"Poison opp Active (1/turn)",type:"active",key:"poisonFumes"},
     attacks:[{name:"Sleepy Bloom",energy:4,baseDmg:50,desc:"Sleep",fx:"sleep"}]},
   {name:"Zeraora",types:["Electric"],cost:5,hp:220,weakness:["Ground"],resistance:["Steel"],
     attacks:[{name:"Volt Switch",energy:1,baseDmg:80,desc:"Force self-retreat",fx:"selfRetreat"},
@@ -506,20 +506,7 @@ function startTurn(G) {
     }
   });
 
-  // Vileplume Pollen Hazard
-  if (p.active) {
-    var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
-    oppAll.forEach(function(pk) {
-      var d = getPokemonData(pk.name);
-      if (d.ability && d.ability.key === 'pollenHazard' && pk === op(G).active && !isPassiveBlocked(G)) {
-        if (p.active && !p.active.status && !(p.active.heldItem === 'Protect Goggles')) {
-          p.active.status = 'poison';
-          addLog(G, 'Pollen Hazard poisons ' + p.active.name + '!', 'effect');
-          G.events.push({ type: 'status_apply', targetPlayer: G.currentPlayer, targetIdx: -1, status: 'poison' });
-        }
-      }
-    });
-  }
+  // (Vileplume Poison Fumes is now an active ability, triggered by player)
 
   addLog(G, '--- ' + p.name + ' Turn ' + G.turn + ' ---', 'info');
   G.events.push({ type: 'turn_start', player: G.currentPlayer, turn: G.turn });
@@ -1234,6 +1221,23 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     G.events.push({ type: 'damage', targetPlayer: targetPlayer, targetIdx: targetBenchIdx, amount: 10, mult: 1 });
     if (targetPk.hp <= 0) handleKO(G, targetPk, targetPlayer);
     return true; // No endTurn for abilities
+  } else if (tType === 'yummyDelivery') {
+    targetPk.energy++;
+    cp(G).usedAbilities['yummyDelivery'] = true;
+    addLog(G, 'Yummy Delivery: ' + targetPk.name + ' +1 energy', 'effect');
+    G.events.push({ type: 'energy_gain', targetPlayer: targetPlayer, targetSlot: 'bench', benchIdx: targetBenchIdx });
+    return true; // No endTurn for abilities
+  } else if (tType === 'poisonFumes') {
+    if (!targetPk.status && !(targetPk.heldItem === 'Protect Goggles')) {
+      targetPk.status = 'poison';
+      cp(G).usedAbilities['poisonFumes'] = true;
+      addLog(G, 'Poison Fumes poisons ' + targetPk.name + '!', 'effect');
+      G.events.push({ type: 'status_apply', targetPlayer: targetPlayer, targetIdx: targetBenchIdx, status: 'poison' });
+    } else {
+      if (targetPk.heldItem === 'Protect Goggles') addLog(G, targetPk.name + '\'s Protect Goggles block it!', 'effect');
+      else addLog(G, targetPk.name + ' already has a status!', 'info');
+    }
+    return true; // No endTurn for abilities
   }
 
   // Finalize attack
@@ -1448,12 +1452,21 @@ function doUseAbility(G, key) {
     addLog(G, 'Healing Touch: heal 30, clear status', 'heal');
   }
   else if (key === 'yummyDelivery') {
-    var ydTarget = p.bench.find(function(pk) { return pk.energy < 5; });
-    if (ydTarget) {
-      ydTarget.energy++;
-      p.usedAbilities[key] = true;
-      addLog(G, 'Yummy Delivery: ' + ydTarget.name + ' +1 energy', 'effect');
-    } else return false;
+    if (!p.active || !(getPokemonData(p.active.name).ability && getPokemonData(p.active.name).ability.key === 'yummyDelivery')) return false;
+    var ydTargets = [];
+    p.bench.forEach(function(bpk, i) { if (bpk.energy < 5) ydTargets.push({ player: G.currentPlayer, idx: i }); });
+    if (ydTargets.length === 0) return false;
+    G.targeting = { type: 'yummyDelivery', validTargets: ydTargets, context: {} };
+    return true;
+  }
+  else if (key === 'poisonFumes') {
+    if (!op(G).active) { addLog(G, 'No opponent active!', 'info'); return false; }
+    if (op(G).active.status) { addLog(G, op(G).active.name + ' already has a status!', 'info'); return false; }
+    if (op(G).active.heldItem === 'Protect Goggles') { addLog(G, op(G).active.name + '\'s Protect Goggles block it!', 'effect'); return false; }
+    p.usedAbilities[key] = true;
+    op(G).active.status = 'poison';
+    addLog(G, 'Poison Fumes poisons ' + op(G).active.name + '!', 'effect');
+    G.events.push({ type: 'status_apply', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, status: 'poison' });
   }
   else if (key === 'hiddenPower') {
     if (p.active && p.active.energy < 5) {
