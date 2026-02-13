@@ -344,7 +344,11 @@ function calcWeaknessResistance(G, attackerTypes, defender) {
   return 1.0;
 }
 
-function calcDamage(G, attacker, defender, attack, attackerTypes, isOppActive) {
+function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner) {
+  // Derive relationship from defender's owner
+  var isOpponent = defenderOwner !== G.currentPlayer;
+  var isOppActive = isOpponent && defender === op(G).active;
+
   var baseDmg = attack.baseDmg;
   var fx = attack.fx || '';
 
@@ -361,7 +365,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, isOppActive) {
 
   if (baseDmg <= 0) return { damage: 0, mult: 1 };
 
-  // Item damage bonuses only apply when hitting opponent's active
+  // Item damage bonuses - Muscle Band/Life Orb/Lucky Punch only vs opponent's active
   var luckyProc = false;
   if (isOppActive) {
     if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
@@ -372,7 +376,8 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, isOppActive) {
   var ignoreRes = fx.indexOf('ignoreRes') >= 0;
   var mult = calcWeaknessResistance(G, attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
-  if (isOppActive && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+  // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
+  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
 
   var totalDmg = Math.floor(baseDmg * mult);
 
@@ -491,14 +496,6 @@ function startTurn(G) {
     }
   });
 
-  // Leftovers
-  allPokemon.forEach(function(pk) {
-    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
-      pk.damage = Math.max(0, pk.damage - 10);
-      pk.hp = pk.maxHp - pk.damage;
-    }
-  });
-
   // Lum Berry
   allPokemon.forEach(function(pk) {
     if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status.length > 0) {
@@ -587,6 +584,17 @@ function endTurn(G) {
     }
   }
 
+  // Leftovers: heal 10 after each player's turn (both players' pokemon)
+  var allPokemonBoth = [p.active].concat(p.bench).concat([op(G).active]).concat(op(G).bench).filter(Boolean);
+  for (var li = 0; li < allPokemonBoth.length; li++) {
+    var lpk = allPokemonBoth[li];
+    if (lpk.heldItem === 'Leftovers' && lpk.damage > 0) {
+      lpk.damage = Math.max(0, lpk.damage - 10);
+      lpk.hp = lpk.maxHp - lpk.damage;
+      addLog(G, 'Leftovers heals ' + lpk.name + ' 10', 'heal');
+    }
+  }
+
   // Switch player
   G.currentPlayer = oppPlayer(G.currentPlayer);
   G.turn++;
@@ -638,7 +646,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   if (fx.indexOf('selfDmg:') >= 0) {
     var sv = parseInt(fx.split('selfDmg:')[1]);
     var selfAtk = Object.assign({}, attack, { baseDmg: sv });
-    var selfRes = calcDamage(G, attacker, attacker, selfAtk, attackerData.types, false);
+    var selfRes = calcDamage(G, attacker, attacker, selfAtk, attackerData.types, G.currentPlayer);
     if (selfRes.filtered) { addLog(G, attacker.name + '\'s Filter blocks the recoil!', 'effect'); }
     else if (selfRes.damage > 0) { dealDamage(G, attacker, selfRes.damage, G.currentPlayer); }
   }
@@ -678,7 +686,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var benchAllAtk = Object.assign({}, attack, { baseDmg: bav });
     p.bench.concat(op(G).bench).forEach(function(bpk) {
       var ownerNum = p.bench.indexOf(bpk) >= 0 ? G.currentPlayer : oppPlayer(G.currentPlayer);
-      var res = calcDamage(G, attacker, bpk, benchAllAtk, attackerData.types, false);
+      var res = calcDamage(G, attacker, bpk, benchAllAtk, attackerData.types, ownerNum);
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, ownerNum);
@@ -691,7 +699,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var obv = parseInt(fx.split('oppBenchDmg:')[1]);
     var oppBenchAtk = Object.assign({}, attack, { baseDmg: obv });
     op(G).bench.slice().forEach(function(bpk) {
-      var res = calcDamage(G, attacker, bpk, oppBenchAtk, attackerData.types, false);
+      var res = calcDamage(G, attacker, bpk, oppBenchAtk, attackerData.types, oppPlayer(G.currentPlayer));
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
@@ -721,7 +729,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (p.bench.length > 0) {
       var sbTarget = p.bench[0];
       var sbAtk = Object.assign({}, attack, { baseDmg: sbdv });
-      var sbRes = calcDamage(G, attacker, sbTarget, sbAtk, attackerData.types, false);
+      var sbRes = calcDamage(G, attacker, sbTarget, sbAtk, attackerData.types, G.currentPlayer);
       if (sbRes.filtered) { addLog(G, sbTarget.name + '\'s Filter blocks the damage!', 'effect'); }
       else if (sbRes.damage > 0) {
         dealDamage(G, sbTarget, sbRes.damage, G.currentPlayer);
@@ -756,7 +764,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   if (fx === 'madParty' && defender) {
     var totalPokemon = [p.active].concat(p.bench).concat([op(G).active]).concat(op(G).bench).filter(Boolean).length;
     var madAtk = Object.assign({}, attack, { baseDmg: totalPokemon * 10 });
-    var madResult = calcDamage(G, attacker, defender, madAtk, attackerData.types, true);
+    var madResult = calcDamage(G, attacker, defender, madAtk, attackerData.types, oppPlayer(G.currentPlayer));
     if (madResult.filtered) {
       addLog(G, defender.name + '\'s Filter blocks the damage!', 'effect');
     } else if (madResult.damage > 0) {
@@ -770,7 +778,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
   // Finishing Fang
   if (fx === 'finishingFang' && defender && defender.hp > 0 && defender.hp <= 120) {
     var fangAtk = Object.assign({}, attack, { baseDmg: 60 });
-    var fangResult = calcDamage(G, attacker, defender, fangAtk, attackerData.types, true);
+    var fangResult = calcDamage(G, attacker, defender, fangAtk, attackerData.types, oppPlayer(G.currentPlayer));
     if (fangResult.filtered) {
       addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
     } else if (fangResult.damage > 0) {
@@ -820,7 +828,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (attacker.energy >= threshold) {
       var condAtk = Object.assign({}, attack, { baseDmg: cbDmg });
       op(G).bench.slice().forEach(function(bpk) {
-        var res = calcDamage(G, attacker, bpk, condAtk, attackerData.types, false);
+        var res = calcDamage(G, attacker, bpk, condAtk, attackerData.types, oppPlayer(G.currentPlayer));
         if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
         if (res.damage > 0) {
           var cbko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
@@ -839,7 +847,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     if (attacker.energy >= energyCost) {
       attacker.energy -= energyCost;
       var boostAtk = Object.assign({}, attack, { baseDmg: extraDmg });
-      var boostResult = calcDamage(G, attacker, defender, boostAtk, attackerData.types, true);
+      var boostResult = calcDamage(G, attacker, defender, boostAtk, attackerData.types, oppPlayer(G.currentPlayer));
       if (boostResult.filtered) {
         addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
       } else if (boostResult.damage > 0) {
@@ -870,7 +878,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var mtTargets = [op(G).active].concat(op(G).bench).filter(Boolean).slice(0, mtCount);
     var multiAtk = Object.assign({}, attack, { baseDmg: mtDmg });
     mtTargets.forEach(function(mtTarget) {
-      var res = calcDamage(G, attacker, mtTarget, multiAtk, attackerData.types, mtTarget === op(G).active);
+      var res = calcDamage(G, attacker, mtTarget, multiAtk, attackerData.types, oppPlayer(G.currentPlayer));
       if (res.filtered) { addLog(G, mtTarget.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var mtko = dealDamage(G, mtTarget, res.damage, oppPlayer(G.currentPlayer));
@@ -928,7 +936,7 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
 
   if (!needsDmg) return false;
 
-  var result = calcDamage(G, attacker, defender, attack, attackerTypes, true);
+  var result = calcDamage(G, attacker, defender, attack, attackerTypes, oppPlayer(G.currentPlayer));
   var ko = false;
 
   if (result.filtered) {
@@ -1164,7 +1172,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   var attackerTypes = ctx.attackerTypes || attackerData.types;
 
   if (tType === 'snipe') {
-    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPk === op(G).active);
+    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPlayer);
     if (snipeResult.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (snipeResult.damage > 0) {
@@ -1182,7 +1190,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var fxResult = processAttackFx(G, ctx.fx, attacker, targetPk, ctx.attack, attackerTypes);
     if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
   } else if (tType === 'sniperBench' || tType === 'swarmSnipe') {
-    var result = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPk === op(G).active);
+    var result = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes, targetPlayer);
     if (result.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (result.damage > 0) {

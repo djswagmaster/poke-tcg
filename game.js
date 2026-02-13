@@ -474,7 +474,11 @@ function calcWeaknessResistance(attackerTypes, defender) {
   return 1.0;
 }
 
-function calcDamage(attacker, defender, attack, attackerTypes, isOppActive) {
+function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
+  // Derive relationship from defender's owner
+  const isOpponent = defenderOwner !== G.currentPlayer;
+  const isOppActive = isOpponent && defender === op().active;
+
   let baseDmg = attack.baseDmg;
   const fx = attack.fx || '';
 
@@ -492,7 +496,7 @@ function calcDamage(attacker, defender, attack, attackerTypes, isOppActive) {
 
   if (baseDmg <= 0) return { damage: 0, mult: 1 };
 
-  // Damage modifiers (BEFORE weakness/resistance) - only vs opponent's active
+  // Item damage bonuses - Muscle Band/Life Orb/Lucky Punch only vs opponent's active
   let luckyProc = false;
   if (isOppActive) {
     if (attacker.heldItem === 'Muscle Band') baseDmg += 20;
@@ -505,8 +509,8 @@ function calcDamage(attacker, defender, attack, attackerTypes, isOppActive) {
   let mult = calcWeaknessResistance(attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
 
-  // Expert Belt: 2x instead of 1.5x - only vs opponent's active
-  if (isOppActive && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+  // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
+  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
 
   let totalDmg = Math.floor(baseDmg * mult);
 
@@ -631,14 +635,6 @@ function startTurn() {
     }
   });
 
-  // Leftovers
-  allPokemon.forEach(pk => {
-    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
-      pk.damage = Math.max(0, pk.damage - 10);
-      pk.hp = pk.maxHp - pk.damage;
-    }
-  });
-
   // Lum Berry auto
   allPokemon.forEach(pk => {
     if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status.length > 0) {
@@ -747,6 +743,16 @@ async function endTurn() {
       } else {
         addLog(`${pk.name} is still Asleep! (Tails)`, 'info');
       }
+    }
+  }
+
+  // Leftovers: heal 10 after each player's turn (both players' pokemon)
+  const allPokemonBoth = [p.active, ...p.bench, op().active, ...op().bench].filter(Boolean);
+  for (const pk of allPokemonBoth) {
+    if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
+      pk.damage = Math.max(0, pk.damage - 10);
+      pk.hp = pk.maxHp - pk.damage;
+      addLog(`Leftovers heals ${pk.name} 10`, 'heal');
     }
   }
 
@@ -859,7 +865,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx.includes('selfDmg:')) {
     const v = parseInt(fx.split('selfDmg:')[1]);
     const selfAtk = {...attack, baseDmg: v};
-    const selfRes = calcDamage(attacker, attacker, selfAtk, attackerData.types, false);
+    const selfRes = calcDamage(attacker, attacker, selfAtk, attackerData.types, G.currentPlayer);
     if (selfRes.filtered) { addLog(`${attacker.name}'s Filter blocks the recoil!`, 'effect'); }
     else if (selfRes.damage > 0) { dealDamage(attacker, selfRes.damage, G.currentPlayer); }
   }
@@ -904,7 +910,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const benchAllAtk = {...attack, baseDmg: v};
     [...p.bench, ...op().bench].forEach(pk => {
       const ownerNum = p.bench.includes(pk) ? G.currentPlayer : opp(G.currentPlayer);
-      const res = calcDamage(attacker, pk, benchAllAtk, attackerData.types, false);
+      const res = calcDamage(attacker, pk, benchAllAtk, attackerData.types, ownerNum);
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(pk, res.damage, ownerNum);
@@ -917,7 +923,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const v = parseInt(fx.split('oppBenchDmg:')[1]);
     const oppBenchAtk = {...attack, baseDmg: v};
     op().bench.forEach(pk => {
-      const res = calcDamage(attacker, pk, oppBenchAtk, attackerData.types, false);
+      const res = calcDamage(attacker, pk, oppBenchAtk, attackerData.types, opp(G.currentPlayer));
       if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
@@ -933,7 +939,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (allTargets.length > 0) {
       const sniperAttack = {...attack, baseDmg: v};
       G.targeting = { type:"sniperBench", validTargets:allTargets, callback:async function(tPk,tOwner){
-        const result = calcDamage(attacker, tPk, sniperAttack, attackerData.types, false);
+        const result = calcDamage(attacker, tPk, sniperAttack, attackerData.types, tOwner);
         const targetSel = getPokemonSelector(tOwner, allTargets.find(t => t.pk === tPk)?.idx ?? -1);
         if (result.filtered) {
           addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
@@ -962,7 +968,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (p.bench.length > 0) {
       const target = p.bench[0];
       const sbAtk = {...attack, baseDmg: v};
-      const sbRes = calcDamage(attacker, target, sbAtk, attackerData.types, false);
+      const sbRes = calcDamage(attacker, target, sbAtk, attackerData.types, G.currentPlayer);
       if (sbRes.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); }
       else if (sbRes.damage > 0) {
         dealDamage(target, sbRes.damage, G.currentPlayer);
@@ -1000,7 +1006,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx === 'madParty' && defender) {
     const totalPokemon = [p.active, ...p.bench, op().active, ...op().bench].filter(Boolean).length;
     const madAtk = {...attack, baseDmg: totalPokemon * 10};
-    const madResult = calcDamage(attacker, defender, madAtk, attackerData.types, true);
+    const madResult = calcDamage(attacker, defender, madAtk, attackerData.types, opp(G.currentPlayer));
     if (madResult.filtered) {
       addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
     } else if (madResult.damage > 0) {
@@ -1015,7 +1021,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   if (fx === 'finishingFang' && defender && defender.hp > 0) {
     if (defender.hp <= 120) {
       const fangAtk = {...attack, baseDmg: 60};
-      const fangResult = calcDamage(attacker, defender, fangAtk, attackerData.types, true);
+      const fangResult = calcDamage(attacker, defender, fangAtk, attackerData.types, opp(G.currentPlayer));
       if (fangResult.filtered) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (fangResult.damage > 0) {
@@ -1051,7 +1057,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (validTargets.length > 0) {
       const swarmAttack = {...attack, baseDmg: swarmBaseDmg};
       G.targeting = { type:"swarmSnipe", validTargets:validTargets, callback:async function(tPk,tOwner){
-        const result = calcDamage(attacker, tPk, swarmAttack, attackerData.types, tPk === op().active);
+        const result = calcDamage(attacker, tPk, swarmAttack, attackerData.types, tOwner);
         const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
         if (result.filtered) {
           addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
@@ -1083,7 +1089,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (attacker.energy >= threshold) {
       const condAtk = {...attack, baseDmg: dmg};
       op().bench.forEach(pk => {
-        const res = calcDamage(attacker, pk, condAtk, attackerData.types, false);
+        const res = calcDamage(attacker, pk, condAtk, attackerData.types, opp(G.currentPlayer));
         if (res.filtered) { addLog(`${pk.name}'s Filter blocks the damage!`, 'effect'); return; }
         if (res.damage > 0) {
           const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
@@ -1102,7 +1108,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (attacker.energy >= energyCost) {
       attacker.energy -= energyCost;
       const boostAtk = {...attack, baseDmg: extraDmg};
-      const boostResult = calcDamage(attacker, defender, boostAtk, attackerData.types, true);
+      const boostResult = calcDamage(attacker, defender, boostAtk, attackerData.types, opp(G.currentPlayer));
       if (boostResult.filtered) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (boostResult.damage > 0) {
@@ -1135,7 +1141,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     const targets = [op().active, ...op().bench].filter(Boolean).slice(0, count);
     const multiAtk = {...attack, baseDmg: dmg};
     targets.forEach(target => {
-      const res = calcDamage(attacker, target, multiAtk, attackerData.types, target === op().active);
+      const res = calcDamage(attacker, target, multiAtk, attackerData.types, opp(G.currentPlayer));
       if (res.filtered) { addLog(`${target.name}'s Filter blocks the damage!`, 'effect'); return; }
       if (res.damage > 0) {
         const ko = dealDamage(target, res.damage, opp(G.currentPlayer));
@@ -1208,7 +1214,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
   const needsDmg = attack.baseDmg > 0 || fx.includes('berserk') || fx.includes('scaleDef') || fx.includes('scaleBoth') || fx.includes('scaleOwn') || fx.includes('scaleBench') || fx.includes('sustained') || fx.includes('bonusDmg') || fx.includes('fullHpBonus') || fx.includes('payback') || fx.includes('scaleDefNeg');
   if (!needsDmg || !defender) return;
 
-  const result = calcDamage(attacker, defender, attack, attackerTypes, true);
+  const result = calcDamage(attacker, defender, attack, attackerTypes, opp(G.currentPlayer));
 
   if (result.filtered) {
     addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
@@ -1296,7 +1302,7 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
 // Shared snipe targeting callback
 function createSnipeCallback(attacker, attack, attackerTypes, fx, validTargets, p) {
   return async function(tPk, tOwner) {
-    const snipeResult = calcDamage(attacker, tPk, attack, attackerTypes, tPk === op().active);
+    const snipeResult = calcDamage(attacker, tPk, attack, attackerTypes, tOwner);
     const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
     if (snipeResult.filtered) {
       addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
