@@ -812,12 +812,13 @@ function actionGrantEnergy(target) {
   addLog(`Granted ${target.name} +1 energy (${cost} mana)`, '');
 
   // Determine which slot this target is in for animation
-  const me = cp();
-  if (target === me.active) {
+  // (Avoid naming a local variable `me`, which shadows the global `me()` helper.)
+  const meP = p;
+  if (target === meP.active) {
     animateEl('#youField .active-slot', 'energy-gain', 400);
     spawnParticlesAtEl('#youField .active-slot', '#F7D02C', 6, {spread:30, size:4});
   } else {
-    const bIdx = me.bench.indexOf(target);
+    const bIdx = meP.bench.indexOf(target);
     if (bIdx >= 0) {
       const sel = `#youField .field-bench-row .bench-slot:nth-child(${bIdx + 1})`;
       animateEl(sel, 'energy-gain', 400);
@@ -829,8 +830,6 @@ function actionGrantEnergy(target) {
 
 // Shared fx processing for attack effects (used by both actionAttack and actionCopiedAttack)
 async function processAttackFx(fx, attacker, defender, attack, p) {
-  // Attacker metadata is used by multiple effect handlers.
-  const attackerData = getPokemonData(attacker.name);
   // Status effects from attack
   if (fx.includes('poison') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
     defender.status = 'poison'; addLog(`${defender.name} is Poisoned!`, 'effect');
@@ -910,6 +909,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   }
 
   // Bench damage (runs through full damage calc)
+  const attackerData = getPokemonData(attacker.name);
   if (fx.includes('benchAll:')) {
     const v = parseInt(fx.split('benchAll:')[1]);
     const benchAllAtk = {...attack, baseDmg: v};
@@ -1748,10 +1748,9 @@ function actionPlayPokemon(handIdx) {
 
 function renderItemAttachPrompt(handIdx, items) {
   const panel = document.getElementById('apActions');
-  const handRef = isOnline ? me().hand : cp().hand;
   let html = '<div class="ap-section-label" style="color:#a855f7">ATTACH A HELD ITEM?</div>';
-  items.forEach((item) => {
-    const realIdx = handRef.indexOf(item);
+  items.forEach((item, i) => {
+    const realIdx = cp().hand.indexOf(item);
     html += `<button class="ap-btn ap-btn-ability" onclick="finishPlayPokemon(${handIdx}, ${realIdx})">
       <span class="atk-name">${item.name}</span>
     </button>`;
@@ -2140,7 +2139,6 @@ function renderSetup() {
     // Show items to pick
     html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${setupItemFor} (or skip):</div>`;
     html += `<div class="setup-card" onclick="assignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
-    html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
     itemHand.forEach(c => {
       const used = setupSelected.some(s => s.heldItem === c.name);
       html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
@@ -2162,17 +2160,16 @@ function renderSetup() {
   // Preview slots
   const preview = document.getElementById('setupPreview');
   let previewHtml = '';
-
   if (isActivePhase) {
     const sel = setupSelected[0];
-    previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="unselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+    previewHtml += `<div class="setup-slot ${sel?'filled':''}">
+      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     for (let i = 0; i < 4; i++) {
       const sel = setupSelected[i];
-      previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="unselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+      previewHtml += `<div class="setup-slot ${sel?'filled':''}">
+        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }
@@ -2196,27 +2193,6 @@ function selectSetupPokemon(name) {
 
   p.mana -= data.cost;
   setupItemFor = name;
-  renderSetup();
-}
-
-function cancelSetupItem() {
-  if (!setupItemFor) return;
-  const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
-  const p = G.players[playerNum];
-  const data = getPokemonData(setupItemFor);
-  if (data) p.mana += data.cost;
-  setupItemFor = null;
-  renderSetup();
-}
-
-function unselectSetup(idx) {
-  if (setupItemFor) return;
-  if (idx < 0 || idx >= setupSelected.length) return;
-  const removed = setupSelected.splice(idx, 1)[0];
-  const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
-  const p = G.players[playerNum];
-  const data = getPokemonData(removed.name);
-  if (data) p.mana += data.cost;
   renderSetup();
 }
 
@@ -2494,7 +2470,7 @@ function renderActionPanel() {
   allMine.forEach(target => {
     const isSlowStart = getPokemonData(target.name).ability?.key === 'slowStart' && !isPassiveBlocked();
     const cost = isSlowStart ? 2 : 1;
-    const canGrant = (isOnline ? (isMyTurn() && !G.pendingRetreat && !G.targeting) : true) && me.mana >= cost && target.energy < 5;
+    const canGrant = me.mana >= cost && target.energy < 5;
     html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${mePlayerNum}].${target === me.active ? 'active' : `bench[${me.bench.indexOf(target)}]`})" ${canGrant?'':'disabled'}>
       <span class="atk-name">+1 Energy → ${target.name}</span>
       <span class="atk-detail">${cost} mana${isSlowStart?' (Slow Start)':''} | ${target.energy}/5</span>
@@ -2736,7 +2712,6 @@ function handleServerMessage(msg) {
 
     case 'error':
       console.warn('Server error:', msg.message);
-      showTurnOverlay('Server error: ' + msg.message);
       break;
 
     case 'pong':
@@ -2887,14 +2862,8 @@ async function replayEvents(events) {
         break;
       }
       case 'retreat': {
-        // In online play, state is already updated to the post-retreat active.
-        // Animate a quick swap on the retreating side to match hotseat feel.
-        const sideField = event.player === myPlayerNum ? '#youField' : '#oppField';
-        animateEl(sideField + ' .active-slot', 'slide-out', 250);
-        await delay(250);
         renderBattle();
-        animateEl(sideField + ' .active-slot', 'slide-in', 300);
-        await delay(350);
+        await delay(400);
         break;
       }
       case 'play_pokemon': {
@@ -2954,45 +2923,10 @@ function showOnlineSetupScreen(phase) {
   document.getElementById('setupPhaseText').textContent = phaseText;
   document.getElementById('setupMana').textContent = `Mana: ${myP.mana}`;
 
-  // Turn-based online setup: if it's not your turn, show a waiting screen.
-  if (G.currentPlayer !== myPlayerNum) {
+  if (myP.ready) {
+    // Already submitted, show waiting
     document.getElementById('setupHand').innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
-    // Show whatever info has already been revealed (server-side filtered).
-    const preview = document.getElementById('setupPreview');
-    const myConfirmed = `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
-        <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Your Field</div>
-        ${myP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-            <img src="${getImg(myP.active.name)}" alt="${myP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
-            <div style="display:flex;flex-direction:column;gap:2px;">
-              <div style="font-size:12px;">${myP.active.name}</div>
-              <div style="font-size:11px;color:#888;">${myP.active.heldItem || 'No item'}</div>
-            </div>
-          </div>` : '<div style="color:#888;font-size:12px;">(no active yet)</div>'}
-        ${myP.bench && myP.bench.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-            ${myP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;" />`).join('')}
-          </div>` : ''}
-      </div>`;
-    // Use same opponent rendering logic as renderOnlineSetup.
-    const oppP = G.players[opp(myPlayerNum)];
-    let oppPanel = '';
-    if (oppP && (oppP.active || (oppP.bench && oppP.bench.length))) {
-      const oppActive = oppP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-          <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
-          <div style="display:flex;flex-direction:column;gap:2px;">
-            <div style="font-weight:800;font-size:12px;">Opponent Active</div>
-            <div style="font-size:12px;">${oppP.active.name}</div>
-            <div style="font-size:11px;color:#888;">${oppP.active.heldItem || 'No item'}</div>
-          </div>
-        </div>` : '';
-      const oppBench = (oppP.bench && oppP.bench.length) ? `<div style="margin-top:8px;">
-          <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Opponent Bench</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${oppP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;" />`).join('')}
-          </div>
-        </div>` : '';
-      oppPanel = `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">${oppActive}${oppBench}</div>`;
-    }
-    preview.innerHTML = oppPanel + myConfirmed;
+    document.getElementById('setupPreview').innerHTML = '';
     return;
   }
 
@@ -3004,10 +2938,6 @@ function renderOnlineSetup() {
   const isActive = phase === 'setupActive';
   const myP = G.players[myPlayerNum];
   const hand = document.getElementById('setupHand');
-
-  // Virtual remaining mana while selecting (server only decrements on confirm).
-  const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
-  const remainingMana = Math.max(0, (myP.mana || 0) - spent);
 
   const placedNames = new Set();
   if (myP.active) placedNames.add(myP.active.name);
@@ -3021,7 +2951,6 @@ function renderOnlineSetup() {
   if (onlineSetupItemFor) {
     html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${onlineSetupItemFor} (or skip):</div>`;
     html += `<div class="setup-card" onclick="onlineAssignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
-    html += `<div class="setup-card" onclick="onlineCancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
     itemHand.forEach(c => {
       const used = onlineSetupSelected.some(s => s.heldItem === c.name);
       html += `<div class="setup-card ${used?'placed':''}" onclick="onlineAssignSetupItem('${c.name.replace(/'/g,"\\'")}')">
@@ -3031,7 +2960,7 @@ function renderOnlineSetup() {
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
-      const canAfford = remainingMana >= data.cost;
+      const canAfford = myP.mana >= data.cost;
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `onlineSelectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
         <span class="cost-badge">${data.cost}⬡</span>
@@ -3042,76 +2971,32 @@ function renderOnlineSetup() {
 
   const preview = document.getElementById('setupPreview');
   let previewHtml = '';
-
-  // Opponent info panel (server filterStateForPlayer already hides anything that
-  // should not be visible yet in setup).
-  const oppP = G.players[opp(myPlayerNum)];
-  if (oppP) {
-    const oppActive = oppP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-        <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
-        <div style="display:flex;flex-direction:column;gap:2px;">
-          <div style="font-weight:800;font-size:12px;">Opponent Active</div>
-          <div style="font-size:12px;">${oppP.active.name}</div>
-          <div style="font-size:11px;color:#888;">${oppP.active.heldItem || 'No item'}</div>
-        </div>
-      </div>` : '';
-    const oppBench = (oppP.bench && oppP.bench.length) ? `<div style="margin-top:8px;">
-        <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Opponent Bench</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          ${oppP.bench.map(pk => `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;min-width:64px;">
-              <img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;" />
-              <div style="font-size:10px;text-align:center;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pk.name}</div>
-            </div>`).join('')}
-        </div>
-      </div>` : '';
-    if (oppActive || oppBench) {
-      previewHtml += `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">${oppActive}${oppBench}</div>`;
-    }
-  }
   if (isActive) {
     const sel = onlineSetupSelected[0];
-    previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="onlineUnselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+    previewHtml += `<div class="setup-slot ${sel?'filled':''}">
+      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     for (let i = 0; i < 4; i++) {
       const sel = onlineSetupSelected[i];
-      previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="onlineUnselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+      previewHtml += `<div class="setup-slot ${sel?'filled':''}">
+        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }
-  const canConfirmBench = !isActive && onlineSetupSelected.length === 0 && !onlineSetupItemFor && pokemonHand.every(c => remainingMana < getPokemonData(c.name).cost);
+  const canConfirmBench = !isActive && onlineSetupSelected.length === 0 && !onlineSetupItemFor && pokemonHand.every(c => myP.mana < getPokemonData(c.name).cost);
   const canConfirm = (onlineSetupSelected.length > 0 && !onlineSetupItemFor) || canConfirmBench;
   previewHtml += `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="onlineConfirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActive ? 'Confirm Active' : (canConfirmBench ? 'Skip Bench (no mana)' : 'Confirm Bench')}</button>`;
   preview.innerHTML = previewHtml;
 
-  document.getElementById('setupMana').textContent = `Mana: ${remainingMana}`;
+  document.getElementById('setupMana').textContent = `Mana: ${myP.mana}`;
 }
 
 function onlineSelectSetupPokemon(name) {
   const isActive = G.phase === 'setupActive';
   if (isActive && onlineSetupSelected.length >= 1) return;
   if (!isActive && onlineSetupSelected.length >= 4) return;
-  // Enforce remaining mana client-side.
-  const myP = G.players[myPlayerNum];
-  const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
-  const remainingMana = Math.max(0, (myP.mana || 0) - spent);
-  const data = getPokemonData(name);
-  if (!data || remainingMana < data.cost) return;
   onlineSetupItemFor = name;
-  renderOnlineSetup();
-}
-
-function onlineCancelSetupItem() {
-  onlineSetupItemFor = null;
-  renderOnlineSetup();
-}
-
-function onlineUnselectSetup(idx) {
-  if (onlineSetupItemFor) return;
-  if (idx < 0 || idx >= onlineSetupSelected.length) return;
-  onlineSetupSelected.splice(idx, 1);
   renderOnlineSetup();
 }
 
