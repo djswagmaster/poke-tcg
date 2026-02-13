@@ -609,7 +609,7 @@ function endTurn(G) {
 // ============================================================
 // ATTACK EFFECTS (processAttackFx equivalent - sync, no DOM)
 // ============================================================
-function processAttackFx(G, fx, attacker, defender, attack, sourceTypes) {
+function processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action) {
   var attackerData = getPokemonData(attacker.name);
   if (!sourceTypes) sourceTypes = attackerData.types;
   var p = cp(G);
@@ -843,8 +843,8 @@ function processAttackFx(G, fx, attacker, defender, attack, sourceTypes) {
     }
   }
 
-  // Optional boost
-  if (fx.indexOf('optBoost:') >= 0 && defender && defender.hp > 0) {
+  // Optional boost (choice)
+  if (action && action.useOptBoost && fx.indexOf('optBoost:') >= 0 && defender && defender.hp > 0) {
     var obParts = fx.split('optBoost:')[1].split(':');
     var extraDmg = parseInt(obParts[0]);
     var energyCost = parseInt(obParts[1]);
@@ -998,7 +998,7 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, 
   return ko;
 }
 
-function doAttack(G, attackIndex) {
+function doAttack(G, attackIndex, action) {
   var p = cp(G);
   var attacker = p.active;
   if (!attacker) return false;
@@ -1068,7 +1068,7 @@ function doAttack(G, attackIndex) {
   dealAttackDamageToDefender(G, attacker, defender, attack, data.types, fx);
 
   // Process fx
-  var fxResult = processAttackFx(G, fx, attacker, defender, attack, data.types);
+  var fxResult = processAttackFx(G, fx, attacker, defender, attack, data.types, action);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
 
   attacker.sustained = true;
@@ -1080,7 +1080,7 @@ function doAttack(G, attackIndex) {
   return true;
 }
 
-function doCopiedAttack(G, sourceName, attackIndex) {
+function doCopiedAttack(G, sourceName, attackIndex, action) {
   var p = cp(G);
   var attacker = p.active;
   if (!attacker) return false;
@@ -1147,7 +1147,7 @@ function doCopiedAttack(G, sourceName, attackIndex) {
 
   dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, fx);
 
-  var fxResult = processAttackFx(G, fx, attacker, defender, attack, sourceTypes);
+  var fxResult = processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
 
   attacker.sustained = true;
@@ -1668,8 +1668,8 @@ function processAction(G, playerNum, action) {
   if (G.pendingRetreat || G.targeting) return false; // Must resolve pending state first
 
   switch (action.type) {
-    case 'attack': return doAttack(G, action.attackIndex);
-    case 'copiedAttack': return doCopiedAttack(G, action.sourceName, action.attackIndex);
+    case 'attack': return doAttack(G, action.attackIndex, action);
+    case 'copiedAttack': return doCopiedAttack(G, action.sourceName, action.attackIndex, action);
     case 'retreat': return doRetreat(G);
     case 'quickRetreat': return doQuickRetreat(G);
     case 'grantEnergy': return doGrantEnergy(G, action.targetSlot, action.benchIdx);

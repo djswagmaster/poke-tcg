@@ -473,6 +473,17 @@ function calcDamage(attacker, defender, attack, attackerTypes) {
   let baseDmg = attack.baseDmg;
   const fx = attack.fx || '';
 
+  // Optional boost choice (e.g., Precipice Purge)
+  let useOptBoost = false;
+  if (fx.includes('optBoost:') && defender && defender.hp > 0) {
+    const parts = fx.split('optBoost:')[1].split(':');
+    const extraDmg = parseInt(parts[0]);
+    const energyCost = parseInt(parts[1]);
+    if (attacker.energy >= energyCost) {
+      useOptBoost = window.confirm(`${attack.name}: Use boosted option (+${extraDmg} dmg, lose ${energyCost} energy)?`);
+    }
+  }
+
   // Attack-specific scaling
   if (fx.includes('scaleDef:')) { const v = parseInt(fx.split('scaleDef:')[1]); baseDmg += v * defender.energy; }
   if (fx.includes('scaleBoth:')) { const v = parseInt(fx.split('scaleBoth:')[1]); baseDmg += v * (attacker.energy + defender.energy); }
@@ -829,7 +840,7 @@ function actionGrantEnergy(target) {
 }
 
 // Shared fx processing for attack effects (used by both actionAttack and actionCopiedAttack)
-async function processAttackFx(fx, attacker, defender, attack, p) {
+async function processAttackFx(fx, attacker, defender, attack, p, opts) {
   // Status effects from attack
   if (fx.includes('poison') && defender && defender.hp > 0 && !(defender.heldItem === 'Protect Goggles')) {
     defender.status = 'poison'; addLog(`${defender.name} is Poisoned!`, 'effect');
@@ -1105,15 +1116,15 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     }
   }
 
-  // Optional boost (full damage calc)
-  if (fx.includes('optBoost:') && defender && defender.hp > 0) {
+  // Optional boost (choice)
+  if (opts && opts.useOptBoost && fx.includes('optBoost:') && defender && defender.hp > 0) {
     const parts = fx.split('optBoost:')[1].split(':');
     const extraDmg = parseInt(parts[0]);
     const energyCost = parseInt(parts[1]);
     if (attacker.energy >= energyCost) {
       attacker.energy -= energyCost;
       const boostAtk = {...attack, baseDmg: extraDmg};
-      const boostResult = calcDamage(attacker, defender, boostAtk, attackerData.types);
+      const boostResult = calcDamage(attacker, defender0, boostAtk, attackerData.types);
       if (boostResult.filtered) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (boostResult.damage > 0) {
@@ -1168,7 +1179,24 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
 
 async function actionAttack(attackIndex) {
   if (G.animating) return;
-  if (isOnline) { sendAction({ actionType: 'attack', attackIndex }); return; }
+  if (isOnline) {
+    const myP = G.players[myPlayerNum];
+    const attacker = myP.active;
+    if (!attacker) return;
+    const data = getPokemonData(attacker.name);
+    const attack = data.attacks[attackIndex];
+    let useOptBoost = false;
+    if (attack && attack.fx && attack.fx.includes('optBoost:')) {
+      const parts = attack.fx.split('optBoost:')[1].split(':');
+      const extraDmg = parseInt(parts[0]);
+      const energyCost = parseInt(parts[1]);
+      if (attacker.energy >= energyCost) {
+        useOptBoost = window.confirm(`${attack.name}: Use boosted option (+${extraDmg} dmg, lose ${energyCost} energy)?`);
+      }
+    }
+    sendAction({ actionType: 'attack', attackIndex, useOptBoost });
+    return;
+  }
   G.animating = true;
   const p = cp();
   const attacker = p.active;
@@ -1276,7 +1304,7 @@ async function actionAttack(attackIndex) {
           await delay(400);
         }
         // Process post-damage fx effects
-        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p);
+        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p, { useOptBoost });
         if (fxResult2 === 'pendingRetreat' || fxResult2 === 'pendingTarget') return;
         finalizeAttack();
       }};
@@ -1376,7 +1404,7 @@ async function actionAttack(attackIndex) {
   }
 
   // Process all attack effects (shared logic)
-  const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
+  const fxResult = await processAttackFx(fx, attacker, defender, attack, p, { useOptBoost });
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
 
   // Sustained mark
@@ -1523,7 +1551,18 @@ async function actionCopiedAttack(copiedIdx) {
   if (isOnline) {
     const copied = copiedAttacks[copiedIdx];
     if (!copied) return;
-    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx });
+    const myP = G.players[myPlayerNum];
+    const attacker = myP.active;
+    let useOptBoost = false;
+    if (attacker && copied.attack && copied.attack.fx && copied.attack.fx.includes('optBoost:')) {
+      const parts = copied.attack.fx.split('optBoost:')[1].split(':');
+      const extraDmg = parseInt(parts[0]);
+      const energyCost = parseInt(parts[1]);
+      if (attacker.energy >= energyCost) {
+        useOptBoost = window.confirm(`${copied.attack.name}: Use boosted option (+${extraDmg} dmg, lose ${energyCost} energy)?`);
+      }
+    }
+    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx, useOptBoost });
     return;
   }
   G.animating = true;
@@ -1533,6 +1572,19 @@ async function actionCopiedAttack(copiedIdx) {
   const copied = copiedAttacks[copiedIdx];
   if (!copied) { G.animating = false; return; }
   const attack = copied.attack;
+
+  // Optional boost choice (copied attack)
+  let useOptBoost = false;
+  const fx = (attack && attack.fx) ? attack.fx : '';
+  const defender0 = op().active;
+  if (fx.includes('optBoost:') && defender0 && defender0.hp > 0) {
+    const parts = fx.split('optBoost:')[1].split(':');
+    const extraDmg = parseInt(parts[0]);
+    const energyCost = parseInt(parts[1]);
+    if (attacker.energy >= energyCost) {
+      useOptBoost = window.confirm(`${attack.name}: Use boosted option (+${extraDmg} dmg, lose ${energyCost} energy)?`);
+    }
+  }
   const sourceTypes = copied.types;
 
   // Sleep check
@@ -1611,7 +1663,7 @@ async function actionCopiedAttack(copiedIdx) {
           if (ko) handleKO(tPk, tOwner);
           await delay(400);
         }
-        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p);
+        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p, { useOptBoost });
         if (fxResult2 === 'pendingRetreat' || fxResult2 === 'pendingTarget') return;
         finalizeAttack();
       }};
@@ -1705,7 +1757,7 @@ async function actionCopiedAttack(copiedIdx) {
   }
 
   // Process all attack effects (shared logic)
-  const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
+  const fxResult = await processAttackFx(fx, attacker, defender, attack, p, { useOptBoost });
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
 
   attacker.sustained = true;
@@ -2862,7 +2914,12 @@ async function replayEvents(events) {
         break;
       }
       case 'retreat': {
+        const side = (event.player === myPlayerNum) ? '#youField' : '#oppField';
+        // slide out old active, then render new state and slide in
+        animateEl(side + ' .active-slot', 'slide-out', 350);
+        await delay(350);
         renderBattle();
+        animateEl(side + ' .active-slot', 'slide-in', 350);
         await delay(400);
         break;
       }
@@ -2923,8 +2980,16 @@ function showOnlineSetupScreen(phase) {
   document.getElementById('setupPhaseText').textContent = phaseText;
   document.getElementById('setupMana').textContent = `Mana: ${myP.mana}`;
 
+  // If it's not my turn to pick during setup, show a waiting screen.
+  // Server-side state filtering will ensure we don't leak hidden info.
+  if (G.currentPlayer !== myPlayerNum) {
+    document.getElementById('setupHand').innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
+    document.getElementById('setupPreview').innerHTML = '';
+    return;
+  }
+
   if (myP.ready) {
-    // Already submitted, show waiting
+    // Already submitted for this step, show waiting
     document.getElementById('setupHand').innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
     document.getElementById('setupPreview').innerHTML = '';
     return;
