@@ -282,7 +282,7 @@ function makePokemon(name, heldItem) {
   return {
     name: name, maxHp: maxHp, hp: maxHp, energy: energy,
     heldItem: actualItem, heldItemUsed: heldItem === 'Power Herb',
-    status: null, damage: 0, shields: [], sustained: false, cantUseAttack: null,
+    status: null, damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
     vulnerability: 0, quickClawActive: heldItem === 'Quick Claw',
     grassWeakUntil: 0, improviseActive: false,
   };
@@ -537,8 +537,13 @@ function endTurn(G) {
     }
   });
 
-  // Sustained tracking
-  if (p.active) p.active.sustained = true;
+  // Sustained tracking: copy attackedThisTurn into sustained, then clear it
+  // This way sustained is only true if the pokemon attacked on THIS turn,
+  // giving the bonus on the NEXT turn's attack only
+  if (p.active) {
+    p.active.sustained = p.active.attackedThisTurn;
+    p.active.attackedThisTurn = false;
+  }
 
   // Status ticks for both players' actives
   var sides = [
@@ -883,7 +888,7 @@ function processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action)
   // Baton Pass
   if (fx === 'batonPass' && p.bench.length > 0) {
     G.pendingRetreat = { player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy };
-    attacker.sustained = true;
+    attacker.attackedThisTurn = true;
     return 'pendingRetreat';
   }
 
@@ -1058,7 +1063,7 @@ function doAttack(G, attackIndex, action) {
   var fxResult = processAttackFx(G, fx, attacker, defender, attack, data.types, action);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
 
-  attacker.sustained = true;
+  attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
 
   if (!G.pendingRetreat && !G.targeting && !G.winner) {
@@ -1137,7 +1142,7 @@ function doCopiedAttack(G, sourceName, attackIndex, action) {
   var fxResult = processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
 
-  attacker.sustained = true;
+  attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
 
   if (!G.pendingRetreat && !G.targeting && !G.winner) {
@@ -1241,7 +1246,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   }
 
   // Finalize attack
-  attacker.sustained = true;
+  attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
 
   if (!G.pendingRetreat && !G.targeting && !G.winner) {
@@ -1297,6 +1302,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   p.bench.splice(benchIdx, 1);
   if (p.active && p.active.hp > 0) {
     p.active.sustained = false;
+    p.active.attackedThisTurn = false;
     if (p.active.status) { addLog(G, p.active.name + '\'s ' + p.active.status + ' was cured on bench!', 'heal'); p.active.status = null; }
     p.bench.push(p.active);
   }

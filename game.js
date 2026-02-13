@@ -296,7 +296,7 @@ function makePokemon(name, heldItem) {
   const actualItem = heldItem === 'Power Herb' ? null : heldItem;
   return {
     name, maxHp, hp: maxHp, energy, heldItem: actualItem, heldItemUsed: heldItem === 'Power Herb',
-    status: null, damage: 0, shields: [], sustained: false, cantUseAttack: null,
+    status: null, damage: 0, shields: [], sustained: false, attackedThisTurn: false, cantUseAttack: null,
     vulnerability: 0, quickClawActive: heldItem === 'Quick Claw',
     grassWeakUntil: 0, improviseActive: false,
   };
@@ -686,8 +686,13 @@ async function endTurn() {
     }
   });
 
-  // Sustained tracking
-  if (p.active) p.active.sustained = true;
+  // Sustained tracking: copy attackedThisTurn into sustained, then clear it
+  // This way sustained is only true if the pokemon attacked on THIS turn,
+  // giving the bonus on the NEXT turn's attack only
+  if (p.active) {
+    p.active.sustained = p.active.attackedThisTurn;
+    p.active.attackedThisTurn = false;
+  }
 
   // Status conditions tick after EVERY player's turn (both players' actives)
   for (const side of [p, op()]) {
@@ -1150,7 +1155,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   // Baton Pass
   if (fx === 'batonPass' && p.bench.length > 0) {
     G.pendingRetreat = { player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy };
-    attacker.sustained = true;
+    attacker.attackedThisTurn = true;
     renderBattle();
     return 'pendingRetreat';
   }
@@ -1404,7 +1409,7 @@ async function actionAttack(attackIndex) {
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
 
   // Sustained mark
-  attacker.sustained = true;
+  attacker.attackedThisTurn = true;
 
   // Check if attacker KO'd self
   if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
@@ -1473,6 +1478,7 @@ async function selectBenchForRetreat(idx) {
   p.bench.splice(idx, 1);
   if (p.active && p.active.hp > 0) {
     p.active.sustained = false;
+    p.active.attackedThisTurn = false;
     if (p.active.status) { addLog(`${p.active.name}'s ${p.active.status} was cured on bench!`, 'heal'); p.active.status = null; }
     p.bench.push(p.active);
   }
@@ -1537,7 +1543,7 @@ function selectTarget(playerNum, benchIdx) {
 async function finalizeAttack() {
   const p = cp();
   const attacker = p.active;
-  if (attacker) attacker.sustained = true;
+  if (attacker) attacker.attackedThisTurn = true;
   if (attacker && attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
   await endTurn();
 }
@@ -1735,7 +1741,7 @@ async function actionCopiedAttack(copiedIdx) {
   const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
 
-  attacker.sustained = true;
+  attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
   await endTurn();
 }

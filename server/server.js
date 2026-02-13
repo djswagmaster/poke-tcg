@@ -7,6 +7,25 @@ const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
 const engine = require('./game-engine');
+const fs = require('fs');
+
+// Load pokemon-data.js and merge corrected stats into the engine's POKEMON_DB
+// pokemon-data.js assigns to window.POKEMON_DATA, so we shim window for it
+(function loadPokemonData() {
+  try {
+    const dataPath = path.join(__dirname, '..', 'pokemon-data.js');
+    const src = fs.readFileSync(dataPath, 'utf8');
+    const fakeWindow = {};
+    const fn = new Function('window', src);
+    fn(fakeWindow);
+    if (fakeWindow.POKEMON_DATA) {
+      engine.mergeExternalData(fakeWindow.POKEMON_DATA);
+      console.log(`Merged ${fakeWindow.POKEMON_DATA.length} Pokemon stats from pokemon-data.js`);
+    }
+  } catch (e) {
+    console.warn('Could not load pokemon-data.js:', e.message);
+  }
+})();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
