@@ -1166,6 +1166,209 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
   return null;
 }
 
+// ============================================================
+// SHARED ATTACK HELPERS (used by both actionAttack & actionCopiedAttack)
+// ============================================================
+
+// Status check before any attack — returns 'blocked', 'ended', or 'ok'
+async function checkStatusBeforeAttackClient(attacker) {
+  if (attacker.status === 'sleep') {
+    addLog(`${attacker.name} is Asleep and can't attack!`, 'info');
+    return 'blocked';
+  }
+  if (attacker.status === 'confusion') {
+    if (Math.random() < 0.5) {
+      attacker.status = null;
+      addLog(`${attacker.name} snapped out of Confusion! (Heads)`, 'info');
+      return 'ok';
+    } else {
+      addLog(`${attacker.name} is Confused! Attack failed (Tails)`, 'info');
+      await endTurn();
+      return 'ended';
+    }
+  }
+  return 'ok';
+}
+
+// Pre-damage effects (selfEnergy, gainMana, benchEnergyAll, benchEnergy)
+function processPreDamageEffectsClient(fx, attacker, p) {
+  if (fx.includes('selfEnergy:')) {
+    const v = parseInt(fx.split('selfEnergy:')[1]);
+    attacker.energy = Math.min(5, attacker.energy + v);
+    if (attacker.heldItem === 'Healing Scarf' && attacker.damage > 0 && v > 0) {
+      attacker.damage = Math.max(0, attacker.damage - 20 * v);
+      attacker.hp = attacker.maxHp - attacker.damage;
+      addLog(`Healing Scarf heals ${attacker.name} ${20*v}`, 'heal');
+    }
+  }
+  if (fx.includes('gainMana:')) { const v = parseInt(fx.split('gainMana:')[1]); p.mana = Math.min(10, p.mana + v); addLog(`Gained ${v} mana`, 'info'); }
+  if (fx.includes('benchEnergyAll')) {
+    p.bench.forEach(pk => { if (pk.energy < 5) { pk.energy++; } });
+    addLog(`Gift Delivery: bench +1 energy each`, 'info');
+  }
+  if (fx.includes('benchEnergy:')) {
+    const target = p.bench.find(pk => pk.energy < 5);
+    if (target) { target.energy++; addLog(`${target.name} gained +1 energy`, 'info'); }
+  }
+}
+
+// Shared damage dealing + animation + reactive items + KO handling
+async function performAttackDamage(attacker, defender, attack, attackerTypes, fx) {
+  const needsDmg = attack.baseDmg > 0 || fx.includes('berserk') || fx.includes('scaleDef') || fx.includes('scaleBoth') || fx.includes('scaleOwn') || fx.includes('scaleBench') || fx.includes('sustained') || fx.includes('bonusDmg') || fx.includes('fullHpBonus') || fx.includes('payback') || fx.includes('scaleDefNeg');
+  if (!needsDmg || !defender) return;
+
+  const result = calcDamage(attacker, defender, attack, attackerTypes);
+
+  if (result.filtered) {
+    addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
+    renderBattle();
+    await delay(500);
+  } else if (result.damage > 0) {
+    const ko = dealDamage(defender, result.damage, opp(G.currentPlayer));
+    let effText = '';
+    if (result.mult > 1) effText = ' (Super Effective!)';
+    if (result.mult < 1) effText = ' (Resisted)';
+    addLog(`${attack.name} deals ${result.damage} to ${defender.name}${effText}`, 'damage');
+    showDamagePopup(result.damage, result.mult);
+    animateEl("#oppField .active-slot", getShakeClass(result.damage), getShakeDuration(result.damage));
+    const attackerColor = TYPE_PARTICLE_COLORS[attackerTypes[0]] || '#ef4444';
+    const particleCount = result.damage >= 100 ? 22 : result.damage >= 50 ? 18 : 14;
+    spawnParticlesAtEl("#oppField .active-slot", attackerColor, particleCount, {spread: result.damage >= 100 ? 75 : 55});
+    renderBattle();
+    await delay(result.damage >= 100 ? 1400 : result.damage >= 50 ? 1100 : 900);
+
+    // Reactive items on defender
+    if (defender.heldItem === 'Rocky Helmet') {
+      dealDamage(attacker, 30, G.currentPlayer);
+      addLog(`Rocky Helmet deals 30 back!`, 'damage');
+      animateEl("#oppField .active-slot", "item-proc", 600);
+      spawnParticlesAtEl("#oppField .active-slot", '#B7B7CE', 8, {spread:40});
+      await delay(400);
+    }
+    if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
+      dealDamage(attacker, 10, G.currentPlayer);
+      attacker.status = 'burn';
+      addLog(`Burn Scarf: 10 damage + Burn!`, 'effect');
+      animateEl("#oppField .active-slot", "item-proc", 600);
+      spawnParticlesAtEl("#youField .active-slot", '#EE8130', 10, {spread:40});
+      await delay(400);
+    }
+    if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
+      dealDamage(attacker, 10, G.currentPlayer);
+      attacker.status = 'poison';
+      addLog(`Poison Barb: 10 damage + Poison!`, 'effect');
+      animateEl("#oppField .active-slot", "item-proc", 600);
+      spawnParticlesAtEl("#youField .active-slot", '#A33EA1', 10, {spread:40});
+      await delay(400);
+    }
+    if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
+      dealDamage(attacker, 10, G.currentPlayer);
+      attacker.status = 'confusion';
+      addLog(`Loud Bell: 10 damage + Confusion!`, 'effect');
+      animateEl("#oppField .active-slot", "item-proc", 600);
+      spawnParticlesAtEl("#youField .active-slot", '#eab308', 10, {spread:40});
+      await delay(400);
+    }
+
+    // Shell Bell heal
+    if (attacker.heldItem === 'Shell Bell') {
+      attacker.damage = Math.max(0, attacker.damage - 30);
+      attacker.hp = attacker.maxHp - attacker.damage;
+      addLog(`Shell Bell heals ${attacker.name} 30`, 'heal');
+      animateEl("#youField .active-slot", "heal-pulse", 500);
+      spawnParticlesAtEl("#youField .active-slot", '#4ade80', 8, {spread:35});
+      renderBattle();
+      await delay(400);
+    }
+
+    // Life Orb recoil
+    if (attacker.heldItem === 'Life Orb') {
+      dealDamage(attacker, 10, G.currentPlayer);
+      addLog(`Life Orb recoil: 10 to ${attacker.name}`, 'damage');
+      renderBattle();
+      await delay(300);
+    }
+
+    await delay(300);
+    if (ko) {
+      animateEl("#oppField .active-slot", "ko-fall", 600);
+      spawnParticlesAtEl("#oppField .active-slot", '#ef4444', 20, {spread:70, size:4});
+      await delay(600);
+      handleKO(defender, opp(G.currentPlayer));
+    }
+    await delay(400);
+  } else {
+    addLog(`${attack.name} dealt 0 damage`, '');
+  }
+}
+
+// Shared snipe targeting callback
+function createSnipeCallback(attacker, attack, attackerTypes, fx, validTargets, p) {
+  return async function(tPk, tOwner) {
+    const snipeResult = calcDamage(attacker, tPk, attack, attackerTypes);
+    const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
+    if (snipeResult.filtered) {
+      addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
+    } else {
+      showDamagePopup(snipeResult.damage, snipeResult.mult, targetSel);
+      animateEl(targetSel, getShakeClass(snipeResult.damage), getShakeDuration(snipeResult.damage));
+      const attackerColor = TYPE_PARTICLE_COLORS[attackerTypes[0]] || '#fff';
+      spawnParticlesAtEl(targetSel, attackerColor, 12, {spread:50});
+      const ko = dealDamage(tPk, snipeResult.damage, tOwner);
+      addLog(attack.name+" hits "+tPk.name+" for "+snipeResult.damage+"!", "damage");
+      if (snipeResult.mult > 1) addLog("Super Effective!", "effect");
+      if (snipeResult.mult < 1) addLog("Not very effective...", "info");
+      renderBattle();
+      await delay(600);
+      if (ko) handleKO(tPk, tOwner);
+      await delay(400);
+    }
+    const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p);
+    if (fxResult2 === 'pendingRetreat' || fxResult2 === 'pendingTarget') return;
+    finalizeAttack();
+  };
+}
+
+// Shared attack execution core — handles damage, fx, sustained, endTurn
+async function executeAttackClient(attacker, attack, attackerTypes, fx, p) {
+  const defender = op().active;
+
+  // Pre-damage effects
+  processPreDamageEffectsClient(fx, attacker, p);
+
+  // Snipe targeting
+  if (fx.includes("snipe") && !fx.includes("sniperBench") && !fx.includes("swarmSnipe")) {
+    const validTargets = [];
+    [G.currentPlayer, opp(G.currentPlayer)].forEach(pNum => {
+      const side = G.players[pNum];
+      if (side.active && side.active.hp > 0) validTargets.push({player:pNum,idx:-1,pk:side.active});
+      side.bench.forEach((pk,bi) => { if (pk.hp > 0) validTargets.push({player:pNum,idx:bi,pk:pk}); });
+    });
+    if (validTargets.length > 0) {
+      G.targeting = { type:"snipe", validTargets, callback: createSnipeCallback(attacker, attack, attackerTypes, fx, validTargets, p) };
+      renderBattle(); return;
+    }
+  }
+
+  if (!defender) { G.animating = false; return; }
+
+  // Deal damage
+  await performAttackDamage(attacker, defender, attack, attackerTypes, fx);
+
+  // Process fx
+  const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
+  if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
+
+  // Sustained + self-KO + endTurn
+  attacker.attackedThisTurn = true;
+  if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
+  await endTurn();
+}
+
+// ============================================================
+// ATTACK ENTRY POINTS
+// ============================================================
+
 async function actionAttack(attackIndex) {
   if (G.animating) return;
   if (isOnline) {
@@ -1198,24 +1401,9 @@ async function actionAttack(attackIndex) {
     G.animating = false; return;
   }
 
-  // Sleep check - can't attack while asleep
-  if (attacker.status === 'sleep') {
-    addLog(`${attacker.name} is Asleep and can't attack!`, 'info');
-    G.animating = false; return;
-  }
-
-  // Confusion check - 50/50 to attack or fail; cleanses on heads
-  if (attacker.status === 'confusion') {
-    if (Math.random() < 0.5) {
-      attacker.status = null;
-      addLog(`${attacker.name} snapped out of Confusion! (Heads)`, 'info');
-      // Attack proceeds normally
-    } else {
-      addLog(`${attacker.name} is Confused! Attack failed (Tails)`, 'info');
-      await endTurn();
-      return;
-    }
-  }
+  const statusResult = await checkStatusBeforeAttackClient(attacker);
+  if (statusResult === 'blocked') { G.animating = false; return; }
+  if (statusResult === 'ended') return;
 
   const attack = data.attacks[attackIndex];
 
@@ -1233,9 +1421,9 @@ async function actionAttack(attackIndex) {
     useOptBoostThisAttack = false;
   }
 
+  // Energy cost with Quick Claw + Thick Aroma
   let energyCost = attack.energy;
   if (attacker.quickClawActive) { energyCost = Math.max(0, energyCost - 2); }
-  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
   const oppActiveTA = op().active;
   if (oppActiveTA && !isPassiveBlocked()) {
     const oppDataTA = getPokemonData(oppActiveTA.name);
@@ -1249,35 +1437,12 @@ async function actionAttack(attackIndex) {
     G.animating = false; return;
   }
 
-  // Energy is NOT spent on attack - it's a requirement, not a cost
+  // Consume Quick Claw
   if (attacker.quickClawActive) { attacker.quickClawActive = false; attacker.heldItemUsed = true; attacker.heldItem = null; addLog('Quick Claw activated! (Discarded)', 'effect'); }
 
-  const defender = op().active;
   const fx = attack.fx || '';
 
-  // Non-damage effects that don't need a target
-  if (fx.includes('selfEnergy:')) {
-    const v = parseInt(fx.split('selfEnergy:')[1]);
-    attacker.energy = Math.min(5, attacker.energy + v);
-    // Healing Scarf
-    if (attacker.heldItem === 'Healing Scarf' && attacker.damage > 0 && v > 0) {
-      attacker.damage = Math.max(0, attacker.damage - 20 * v);
-      attacker.hp = attacker.maxHp - attacker.damage;
-      addLog(`Healing Scarf heals ${attacker.name} ${20*v}`, 'heal');
-    }
-  }
-  if (fx.includes('gainMana:')) { const v = parseInt(fx.split('gainMana:')[1]); p.mana = Math.min(10, p.mana + v); addLog(`Gained ${v} mana`, 'info'); }
-  if (fx.includes('benchEnergyAll')) {
-    p.bench.forEach(pk => { if (pk.energy < 5) { pk.energy++; } });
-    addLog(`Gift Delivery: bench +1 energy each`, 'info');
-  }
-  if (fx.includes('benchEnergy:')) {
-    // Grant 1 bench pokemon energy - for now pick first bench that can receive
-    const target = p.bench.find(pk => pk.energy < 5);
-    if (target) { target.energy++; addLog(`${target.name} gained +1 energy`, 'info'); }
-  }
-
-  // Animation: attack declaration (always runs)
+  // Animation: attack declaration
   addLog(attacker.name + " uses " + attack.name + "!", "info");
   renderBattle();
   focusOnActives();
@@ -1285,145 +1450,7 @@ async function actionAttack(attackIndex) {
   animateEl("#youField .active-slot", "attacking", 400);
   await delay(400);
 
-  // Snipe: target any pokemon (active or bench, either side) — before normal damage
-  if (fx.includes("snipe") && !fx.includes("sniperBench") && !fx.includes("swarmSnipe")) {
-    const validTargets = [];
-    [G.currentPlayer, opp(G.currentPlayer)].forEach(pNum => {
-      const side = G.players[pNum];
-      if (side.active && side.active.hp > 0) validTargets.push({player:pNum,idx:-1,pk:side.active});
-      side.bench.forEach((pk,bi) => { if (pk.hp > 0) validTargets.push({player:pNum,idx:bi,pk:pk}); });
-    });
-    if (validTargets.length > 0) {
-      G.targeting = { type:"snipe", validTargets:validTargets, callback:async function(tPk,tOwner){
-        const snipeResult = calcDamage(attacker, tPk, attack, data.types);
-        const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
-        if (snipeResult.filtered) {
-          addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
-        } else {
-          showDamagePopup(snipeResult.damage, snipeResult.mult, targetSel);
-          animateEl(targetSel, getShakeClass(snipeResult.damage), getShakeDuration(snipeResult.damage));
-          const attackerColor = TYPE_PARTICLE_COLORS[data.types[0]] || '#fff';
-          spawnParticlesAtEl(targetSel, attackerColor, 12, {spread:50});
-          const ko = dealDamage(tPk, snipeResult.damage, tOwner);
-          addLog(attack.name+" hits "+tPk.name+" for "+snipeResult.damage+"!", "damage");
-          if (snipeResult.mult > 1) addLog("Super Effective!", "effect");
-          if (snipeResult.mult < 1) addLog("Not very effective...", "info");
-          renderBattle();
-          await delay(600);
-          if (ko) handleKO(tPk, tOwner);
-          await delay(400);
-        }
-        // Process post-damage fx effects
-        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p);
-        if (fxResult2 === 'pendingRetreat' || fxResult2 === 'pendingTarget') return;
-        finalizeAttack();
-      }};
-      renderBattle(); return;
-    }
-  }
-
-  // Deal damage to defender
-  if (attack.baseDmg > 0 || fx.includes('berserk') || fx.includes('scaleDef') || fx.includes('scaleBoth') || fx.includes('scaleOwn') || fx.includes('scaleBench') || fx.includes('sustained') || fx.includes('bonusDmg') || fx.includes('fullHpBonus') || fx.includes('payback') || fx.includes('scaleDefNeg')) {
-    if (defender) {
-
-      const result = calcDamage(attacker, defender, attack, data.types);
-
-      if (result.filtered) {
-        addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
-        renderBattle();
-        await delay(500);
-      } else if (result.damage > 0) {
-        const ko = dealDamage(defender, result.damage, opp(G.currentPlayer));
-        let effText = '';
-        if (result.mult > 1) effText = ' (Super Effective!)';
-        if (result.mult < 1) effText = ' (Resisted)';
-        addLog(`${attack.name} deals ${result.damage} to ${defender.name}${effText}`, 'damage');
-        showDamagePopup(result.damage, result.mult);
-        animateEl("#oppField .active-slot", getShakeClass(result.damage), getShakeDuration(result.damage));
-        // Type-colored particles on hit - more particles for bigger damage
-        const attackerColor = TYPE_PARTICLE_COLORS[data.types[0]] || '#ef4444';
-        const particleCount = result.damage >= 100 ? 22 : result.damage >= 50 ? 18 : 14;
-        spawnParticlesAtEl("#oppField .active-slot", attackerColor, particleCount, {spread: result.damage >= 100 ? 75 : 55});
-        renderBattle();
-        await delay(result.damage >= 100 ? 1400 : result.damage >= 50 ? 1100 : 900);
-
-        // Reactive items on defender (proc even if KO'd)
-        if (defender.heldItem === 'Rocky Helmet') {
-          dealDamage(attacker, 30, G.currentPlayer);
-          addLog(`Rocky Helmet deals 30 back!`, 'damage');
-          animateEl("#oppField .active-slot", "item-proc", 600);
-          spawnParticlesAtEl("#oppField .active-slot", '#B7B7CE', 8, {spread:40});
-          await delay(400);
-        }
-        if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
-          dealDamage(attacker, 10, G.currentPlayer);
-          attacker.status = 'burn';
-          addLog(`Burn Scarf: 10 damage + Burn!`, 'effect');
-          animateEl("#oppField .active-slot", "item-proc", 600);
-          spawnParticlesAtEl("#youField .active-slot", '#EE8130', 10, {spread:40});
-          await delay(400);
-        }
-        if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
-          dealDamage(attacker, 10, G.currentPlayer);
-          attacker.status = 'poison';
-          addLog(`Poison Barb: 10 damage + Poison!`, 'effect');
-          animateEl("#oppField .active-slot", "item-proc", 600);
-          spawnParticlesAtEl("#youField .active-slot", '#A33EA1', 10, {spread:40});
-          await delay(400);
-        }
-        if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
-          dealDamage(attacker, 10, G.currentPlayer);
-          attacker.status = 'confusion';
-          addLog(`Loud Bell: 10 damage + Confusion!`, 'effect');
-          animateEl("#oppField .active-slot", "item-proc", 600);
-          spawnParticlesAtEl("#youField .active-slot", '#eab308', 10, {spread:40});
-          await delay(400);
-        }
-
-        // Shell Bell heal
-        if (attacker.heldItem === 'Shell Bell') {
-          attacker.damage = Math.max(0, attacker.damage - 30);
-          attacker.hp = attacker.maxHp - attacker.damage;
-          addLog(`Shell Bell heals ${attacker.name} 30`, 'heal');
-          animateEl("#youField .active-slot", "heal-pulse", 500);
-          spawnParticlesAtEl("#youField .active-slot", '#4ade80', 8, {spread:35});
-          renderBattle();
-          await delay(400);
-        }
-
-        // Life Orb recoil
-        if (attacker.heldItem === 'Life Orb') {
-          dealDamage(attacker, 10, G.currentPlayer);
-          addLog(`Life Orb recoil: 10 to ${attacker.name}`, 'damage');
-          renderBattle();
-          await delay(300);
-        }
-
-        await delay(300);
-        if (ko) {
-          animateEl("#oppField .active-slot", "ko-fall", 600);
-          spawnParticlesAtEl("#oppField .active-slot", '#ef4444', 20, {spread:70, size:4});
-          await delay(600);
-          handleKO(defender, opp(G.currentPlayer));
-        }
-        await delay(400);
-      } else {
-        addLog(`${attack.name} dealt 0 damage`, '');
-      }
-    }
-  }
-
-  // Process all attack effects (shared logic)
-  const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
-  if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
-
-  // Sustained mark
-  attacker.attackedThisTurn = true;
-
-  // Check if attacker KO'd self
-  if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-
-  await endTurn();
+  await executeAttackClient(attacker, attack, data.types, fx, p);
 }
 
 function actionRetreat() {
@@ -1575,26 +1602,15 @@ async function actionCopiedAttack(copiedIdx) {
   const copied = copiedAttacks[copiedIdx];
   if (!copied) { G.animating = false; return; }
   const attack = copied.attack;
-  const sourceTypes = copied.types;
+  const attData = getPokemonData(attacker.name);
 
-  // Sleep check
-  if (attacker.status === 'sleep') { addLog(`${attacker.name} is Asleep and can't attack!`, 'info'); G.animating = false; return; }
+  // Status check (sleep / confusion)
+  const statusResult = await checkStatusBeforeAttackClient(attacker);
+  if (statusResult === 'blocked') { G.animating = false; return; }
+  if (statusResult === 'ended') return;
 
-  // Confusion check
-  if (attacker.status === 'confusion') {
-    if (Math.random() < 0.5) {
-      attacker.status = null;
-      addLog(`${attacker.name} snapped out of Confusion! (Heads)`, 'info');
-    } else {
-      addLog(`${attacker.name} is Confused! Attack failed (Tails)`, 'info');
-      await endTurn();
-      return;
-    }
-  }
-
-  // Energy check - copied attacks use attacker's energy
+  // Energy check with Thick Aroma
   let copiedEnergyCost = attack.energy;
-  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
   const oppActiveCA = op().active;
   if (oppActiveCA && !isPassiveBlocked()) {
     const oppDataCA = getPokemonData(oppActiveCA.name);
@@ -1602,9 +1618,9 @@ async function actionCopiedAttack(copiedIdx) {
   }
   if (attacker.energy < copiedEnergyCost) { G.animating = false; return; }
 
-  const defender = op().active;
   const fx = attack.fx || '';
 
+  // Animation: attack declaration
   addLog(`${attacker.name} uses ${attack.name}! (copied)`, 'info');
   renderBattle();
   focusOnActives();
@@ -1612,154 +1628,8 @@ async function actionCopiedAttack(copiedIdx) {
   animateEl("#youField .active-slot", "attacking", 400);
   await delay(400);
 
-  // Pre-damage effects
-  if (fx.includes('selfEnergy:')) {
-    const v = parseInt(fx.split('selfEnergy:')[1]);
-    attacker.energy = Math.min(5, attacker.energy + v);
-    if (attacker.heldItem === 'Healing Scarf' && attacker.damage > 0 && v > 0) {
-      attacker.damage = Math.max(0, attacker.damage - 20 * v);
-      attacker.hp = attacker.maxHp - attacker.damage;
-      addLog(`Healing Scarf heals ${attacker.name} ${20*v}`, 'heal');
-    }
-  }
-  if (fx.includes('gainMana:')) { const v = parseInt(fx.split('gainMana:')[1]); p.mana = Math.min(10, p.mana + v); addLog(`Gained ${v} mana`, 'info'); }
-  if (fx.includes('benchEnergyAll')) {
-    p.bench.forEach(pk => { if (pk.energy < 5) { pk.energy++; } });
-    addLog(`Gift Delivery: bench +1 energy each`, 'info');
-  }
-  if (fx.includes('benchEnergy:')) {
-    const target = p.bench.find(pk => pk.energy < 5);
-    if (target) { target.energy++; addLog(`${target.name} gained +1 energy`, 'info'); }
-  }
-
-  // Snipe: target any pokemon
-  if (fx.includes("snipe") && !fx.includes("sniperBench") && !fx.includes("swarmSnipe")) {
-    const validTargets = [];
-    [G.currentPlayer, opp(G.currentPlayer)].forEach(pNum => {
-      const side = G.players[pNum];
-      if (side.active && side.active.hp > 0) validTargets.push({player:pNum,idx:-1,pk:side.active});
-      side.bench.forEach((pk,bi) => { if (pk.hp > 0) validTargets.push({player:pNum,idx:bi,pk:pk}); });
-    });
-    if (validTargets.length > 0) {
-      G.targeting = { type:"snipe", validTargets:validTargets, callback:async function(tPk,tOwner){
-        const snipeResult = calcDamage(attacker, tPk, attack, sourceTypes);
-        const targetSel = getPokemonSelector(tOwner, validTargets.find(t => t.pk === tPk)?.idx ?? -1);
-        if (snipeResult.filtered) {
-          addLog(`${tPk.name}'s Filter blocks the damage!`, 'effect');
-        } else {
-          showDamagePopup(snipeResult.damage, snipeResult.mult, targetSel);
-          animateEl(targetSel, getShakeClass(snipeResult.damage), getShakeDuration(snipeResult.damage));
-          const attackerColor = TYPE_PARTICLE_COLORS[sourceTypes[0]] || '#fff';
-          spawnParticlesAtEl(targetSel, attackerColor, 12, {spread:50});
-          const ko = dealDamage(tPk, snipeResult.damage, tOwner);
-          addLog(attack.name+" hits "+tPk.name+" for "+snipeResult.damage+"!", "damage");
-          if (snipeResult.mult > 1) addLog("Super Effective!", "effect");
-          if (snipeResult.mult < 1) addLog("Not very effective...", "info");
-          renderBattle();
-          await delay(600);
-          if (ko) handleKO(tPk, tOwner);
-          await delay(400);
-        }
-        const fxResult2 = await processAttackFx(fx, attacker, tPk, attack, p);
-        if (fxResult2 === 'pendingRetreat' || fxResult2 === 'pendingTarget') return;
-        finalizeAttack();
-      }};
-      renderBattle(); return;
-    }
-  }
-
-  if (!defender) { G.animating = false; return; }
-
-  const result = calcDamage(attacker, defender, attack, sourceTypes);
-  if (result.filtered) {
-    addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
-    renderBattle();
-    await delay(500);
-  } else if (result.damage > 0) {
-    const ko = dealDamage(defender, result.damage, opp(G.currentPlayer));
-    let effText = '';
-    if (result.mult > 1) effText = ' (Super Effective!)';
-    if (result.mult < 1) effText = ' (Resisted)';
-    addLog(`${attack.name} deals ${result.damage} to ${defender.name}${effText}`, 'damage');
-    showDamagePopup(result.damage, result.mult);
-    animateEl("#oppField .active-slot", getShakeClass(result.damage), getShakeDuration(result.damage));
-    const attackerColor = TYPE_PARTICLE_COLORS[sourceTypes[0]] || '#ef4444';
-    const particleCount = result.damage >= 100 ? 22 : result.damage >= 50 ? 18 : 14;
-    spawnParticlesAtEl("#oppField .active-slot", attackerColor, particleCount, {spread: result.damage >= 100 ? 75 : 55});
-    renderBattle();
-    await delay(result.damage >= 100 ? 1400 : result.damage >= 50 ? 1100 : 900);
-
-    // Reactive items on defender (proc even if KO'd)
-    if (defender.heldItem === 'Rocky Helmet') {
-      dealDamage(attacker, 30, G.currentPlayer);
-      addLog(`Rocky Helmet deals 30 back!`, 'damage');
-      animateEl("#oppField .active-slot", "item-proc", 600);
-      spawnParticlesAtEl("#oppField .active-slot", '#B7B7CE', 8, {spread:40});
-      await delay(400);
-    }
-    if (defender.heldItem === 'Burn Scarf' && !(attacker.heldItem === 'Protect Goggles')) {
-      dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'burn';
-      addLog(`Burn Scarf: 10 damage + Burn!`, 'effect');
-      animateEl("#oppField .active-slot", "item-proc", 600);
-      spawnParticlesAtEl("#youField .active-slot", '#EE8130', 10, {spread:40});
-      await delay(400);
-    }
-    if (defender.heldItem === 'Poison Barb' && !(attacker.heldItem === 'Protect Goggles')) {
-      dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'poison';
-      addLog(`Poison Barb: 10 damage + Poison!`, 'effect');
-      animateEl("#oppField .active-slot", "item-proc", 600);
-      spawnParticlesAtEl("#youField .active-slot", '#A33EA1', 10, {spread:40});
-      await delay(400);
-    }
-    if (defender.heldItem === 'Loud Bell' && !(attacker.heldItem === 'Protect Goggles')) {
-      dealDamage(attacker, 10, G.currentPlayer);
-      attacker.status = 'confusion';
-      addLog(`Loud Bell: 10 damage + Confusion!`, 'effect');
-      animateEl("#oppField .active-slot", "item-proc", 600);
-      spawnParticlesAtEl("#youField .active-slot", '#eab308', 10, {spread:40});
-      await delay(400);
-    }
-
-    // Shell Bell heal
-    if (attacker.heldItem === 'Shell Bell') {
-      attacker.damage = Math.max(0, attacker.damage - 30);
-      attacker.hp = attacker.maxHp - attacker.damage;
-      addLog(`Shell Bell heals ${attacker.name} 30`, 'heal');
-      animateEl("#youField .active-slot", "heal-pulse", 500);
-      spawnParticlesAtEl("#youField .active-slot", '#4ade80', 8, {spread:35});
-      renderBattle();
-      await delay(400);
-    }
-
-    // Life Orb recoil
-    if (attacker.heldItem === 'Life Orb') {
-      dealDamage(attacker, 10, G.currentPlayer);
-      addLog(`Life Orb recoil: 10 to ${attacker.name}`, 'damage');
-      renderBattle();
-      await delay(300);
-    }
-
-    await delay(300);
-    if (ko) {
-      animateEl("#oppField .active-slot", "ko-fall", 600);
-      spawnParticlesAtEl("#oppField .active-slot", '#ef4444', 20, {spread:70, size:4});
-      await delay(600);
-      handleKO(defender, opp(G.currentPlayer));
-    }
-    await delay(400);
-  } else {
-    addLog(`${attack.name} dealt 0 damage`, '');
-  }
-
-  // Process all attack effects (shared logic)
-  const fxResult = await processAttackFx(fx, attacker, defender, attack, p);
-  if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return;
-
-  attacker.attackedThisTurn = true;
-  if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-  await endTurn();
+  // Use shared attack core with ATTACKER's types (not source's)
+  await executeAttackClient(attacker, attack, attData.types, fx, p);
 }
 
 function actionPlayPokemon(handIdx) {

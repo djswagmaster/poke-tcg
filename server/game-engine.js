@@ -604,9 +604,9 @@ function endTurn(G) {
 // ============================================================
 // ATTACK EFFECTS (processAttackFx equivalent - sync, no DOM)
 // ============================================================
-function processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action) {
+function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, action) {
   var attackerData = getPokemonData(attacker.name);
-  if (!sourceTypes) sourceTypes = attackerData.types;
+  if (!attackerTypes) attackerTypes = attackerData.types;
   var p = cp(G);
 
   // Status effects
@@ -717,7 +717,7 @@ function processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action)
       G.targeting = {
         type: 'sniperBench',
         validTargets: allTargets.map(function(t) { return { player: t.player, idx: t.idx }; }),
-        context: { attack: Object.assign({}, attack, { baseDmg: sbv }), sourceTypes: sourceTypes }
+        context: { attack: Object.assign({}, attack, { baseDmg: sbv }), attackerTypes: attackerTypes }
       };
       return 'pendingTarget';
     }
@@ -813,7 +813,7 @@ function processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action)
       G.targeting = {
         type: 'swarmSnipe',
         validTargets: validTargets,
-        context: { attack: Object.assign({}, attack, { baseDmg: swarmBaseDmg }), sourceTypes: sourceTypes }
+        context: { attack: Object.assign({}, attack, { baseDmg: swarmBaseDmg }), attackerTypes: attackerTypes }
       };
       return 'pendingTarget';
     }
@@ -925,7 +925,7 @@ function processPreDamageEffects(G, fx, attacker, p) {
 }
 
 // Deal attack damage to defender + reactive items
-function dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, fx) {
+function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes, fx) {
   if (!defender) return false;
   var attackerData = getPokemonData(attacker.name);
   var needsDmg = attack.baseDmg > 0 || fx.indexOf('berserk') >= 0 || fx.indexOf('scaleDef') >= 0 ||
@@ -935,7 +935,7 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, 
 
   if (!needsDmg) return false;
 
-  var result = calcDamage(G, attacker, defender, attack, sourceTypes);
+  var result = calcDamage(G, attacker, defender, attack, attackerTypes);
   var ko = false;
 
   if (result.filtered) {
@@ -993,63 +993,34 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, 
   return ko;
 }
 
-function doAttack(G, attackIndex, action) {
-  var p = cp(G);
-  var attacker = p.active;
-  if (!attacker) return false;
-  var data = getPokemonData(attacker.name);
-
-  if (data.ability && data.ability.key === 'defeatist' && attacker.damage >= 120 && !isPassiveBlocked(G)) {
-    addLog(G, attacker.name + ' can\'t attack (Defeatist)!', 'info');
-    return false;
-  }
-
+// Shared status check before any attack (regular or copied)
+function checkStatusBeforeAttack(G, attacker) {
   if (attacker.status === 'sleep') {
     addLog(G, attacker.name + ' is Asleep and can\'t attack!', 'info');
-    return false;
+    return 'blocked';
   }
-
   if (attacker.status === 'confusion') {
     if (Math.random() < 0.5) {
       attacker.status = null;
       addLog(G, attacker.name + ' snapped out of Confusion! (Heads)', 'info');
+      return 'ok';
     } else {
       addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
       endTurn(G);
-      return true;
+      return 'ended';
     }
   }
+  return 'ok';
+}
 
-  var attack = data.attacks[attackIndex];
-  if (!attack) return false;
-  var energyCost = attack.energy;
-  if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
-  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
-  var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
-    var oppData = getPokemonData(oppActive.name);
-    if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
-  }
-  if (attacker.energy < energyCost) return false;
-
-  if (attacker.cantUseAttack === attack.name) {
-    addLog(G, 'Can\'t use ' + attack.name + ' this turn!', 'info');
-    return false;
-  }
-
-  if (attacker.quickClawActive) {
-    attacker.quickClawActive = false;
-    attacker.heldItemUsed = true;
-    attacker.heldItem = null;
-    addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
-  }
-
+// Shared attack execution core — used by both doAttack and doCopiedAttack
+function executeAttack(G, attacker, attack, attackerTypes, fx, action, logSuffix) {
+  var p = cp(G);
   var defender = op(G).active;
-  var fx = attack.fx || '';
 
   processPreDamageEffects(G, fx, attacker, p);
 
-  addLog(G, attacker.name + ' uses ' + attack.name + '!', 'info');
+  addLog(G, attacker.name + ' uses ' + attack.name + '!' + (logSuffix || ''), 'info');
   G.events.push({ type: 'attack_declare', player: G.currentPlayer, attackName: attack.name });
 
   // Snipe targeting
@@ -1059,17 +1030,19 @@ function doAttack(G, attackIndex, action) {
       G.targeting = {
         type: 'snipe',
         validTargets: validTargets,
-        context: { attack: Object.assign({}, attack), sourceTypes: data.types, fx: fx }
+        context: { attack: Object.assign({}, attack), attackerTypes: attackerTypes, fx: fx }
       };
       return true;
     }
   }
 
+  if (!defender) return false;
+
   // Deal damage
-  dealAttackDamageToDefender(G, attacker, defender, attack, data.types, fx);
+  dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes, fx);
 
   // Process fx
-  var fxResult = processAttackFx(G, fx, attacker, defender, attack, data.types, action);
+  var fxResult = processAttackFx(G, fx, attacker, defender, attack, attackerTypes, action);
   if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
 
   attacker.attackedThisTurn = true;
@@ -1079,6 +1052,52 @@ function doAttack(G, attackIndex, action) {
     endTurn(G);
   }
   return true;
+}
+
+function doAttack(G, attackIndex, action) {
+  var p = cp(G);
+  var attacker = p.active;
+  if (!attacker) return false;
+  var data = getPokemonData(attacker.name);
+
+  // Defeatist check
+  if (data.ability && data.ability.key === 'defeatist' && attacker.damage >= 120 && !isPassiveBlocked(G)) {
+    addLog(G, attacker.name + ' can\'t attack (Defeatist)!', 'info');
+    return false;
+  }
+
+  var statusResult = checkStatusBeforeAttack(G, attacker);
+  if (statusResult === 'blocked') return false;
+  if (statusResult === 'ended') return true;
+
+  var attack = data.attacks[attackIndex];
+  if (!attack) return false;
+
+  // Energy cost with Quick Claw + Thick Aroma
+  var energyCost = attack.energy;
+  if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
+  var oppActive = op(G).active;
+  if (oppActive && !isPassiveBlocked(G)) {
+    var oppData = getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
+  }
+  if (attacker.energy < energyCost) return false;
+
+  // Locked attack check
+  if (attacker.cantUseAttack === attack.name) {
+    addLog(G, 'Can\'t use ' + attack.name + ' this turn!', 'info');
+    return false;
+  }
+
+  // Consume Quick Claw
+  if (attacker.quickClawActive) {
+    attacker.quickClawActive = false;
+    attacker.heldItemUsed = true;
+    attacker.heldItem = null;
+    addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
+  }
+
+  return executeAttack(G, attacker, attack, data.types, attack.fx || '', action);
 }
 
 function doCopiedAttack(G, sourceName, attackIndex, action) {
@@ -1091,7 +1110,6 @@ function doCopiedAttack(G, sourceName, attackIndex, action) {
   var sourceData = getPokemonData(sourceName);
   if (!sourceData) return false;
 
-  // Check if this is valid: Mew Versatility or Ditto Improvise
   var isVersatility = attData.ability && attData.ability.key === 'versatility' && !isPassiveBlocked(G);
   var isImprovise = attacker.improviseActive;
 
@@ -1106,65 +1124,22 @@ function doCopiedAttack(G, sourceName, attackIndex, action) {
 
   var attack = sourceData.attacks[attackIndex];
   if (!attack) return false;
-  var sourceTypes = sourceData.types;
 
-  if (attacker.status === 'sleep') { addLog(G, attacker.name + ' is Asleep and can\'t attack!', 'info'); return false; }
+  var statusResult = checkStatusBeforeAttack(G, attacker);
+  if (statusResult === 'blocked') return false;
+  if (statusResult === 'ended') return true;
 
-  if (attacker.status === 'confusion') {
-    if (Math.random() < 0.5) {
-      attacker.status = null;
-      addLog(G, attacker.name + ' snapped out of Confusion! (Heads)', 'info');
-    } else {
-      addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
-      endTurn(G);
-      return true;
-    }
+  // Energy check with Thick Aroma (no Quick Claw for copied attacks)
+  var energyCost = attack.energy;
+  var oppActive = op(G).active;
+  if (oppActive && !isPassiveBlocked(G)) {
+    var oppData = getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
   }
+  if (attacker.energy < energyCost) return false;
 
-  var copiedEnergyCost = attack.energy;
-  // Thick Aroma: opponent's Active makes our attacks cost +1 energy
-  var oppActiveC = op(G).active;
-  if (oppActiveC && !isPassiveBlocked(G)) {
-    var oppDataC = getPokemonData(oppActiveC.name);
-    if (oppDataC.ability && oppDataC.ability.key === 'thickAroma') copiedEnergyCost += 1;
-  }
-  if (attacker.energy < copiedEnergyCost) return false;
-
-  var defender = op(G).active;
-  var fx = attack.fx || '';
-
-  addLog(G, attacker.name + ' uses ' + attack.name + '! (copied)', 'info');
-  G.events.push({ type: 'attack_declare', player: G.currentPlayer, attackName: attack.name });
-
-  processPreDamageEffects(G, fx, attacker, p);
-
-  // Snipe targeting
-  if (fx.indexOf('snipe') >= 0 && fx.indexOf('sniperBench') < 0 && fx.indexOf('swarmSnipe') < 0) {
-    var validTargets = getAllValidTargets(G);
-    if (validTargets.length > 0) {
-      G.targeting = {
-        type: 'snipe',
-        validTargets: validTargets,
-        context: { attack: Object.assign({}, attack), sourceTypes: sourceTypes, fx: fx }
-      };
-      return true;
-    }
-  }
-
-  if (!defender) return false;
-
-  dealAttackDamageToDefender(G, attacker, defender, attack, sourceTypes, fx);
-
-  var fxResult = processAttackFx(G, fx, attacker, defender, attack, sourceTypes, action);
-  if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
-
-  attacker.attackedThisTurn = true;
-  if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
-
-  if (!G.pendingRetreat && !G.targeting && !G.winner) {
-    endTurn(G);
-  }
-  return true;
+  // Use ATTACKER's types for weakness/resistance, not source's
+  return executeAttack(G, attacker, attack, attData.types, attack.fx || '', action, ' (copied)');
 }
 
 function getAllValidTargets(G) {
@@ -1193,10 +1168,10 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   var attacker = cp(G).active;
   if (!attacker) return false;
   var attackerData = getPokemonData(attacker.name);
-  var sourceTypes = ctx.sourceTypes || attackerData.types;
+  var attackerTypes = ctx.attackerTypes || attackerData.types;
 
   if (tType === 'snipe') {
-    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, sourceTypes);
+    var snipeResult = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes);
     if (snipeResult.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (snipeResult.damage > 0) {
@@ -1211,10 +1186,10 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
       }
     }
     // Process remaining fx
-    var fxResult = processAttackFx(G, ctx.fx, attacker, targetPk, ctx.attack, sourceTypes);
+    var fxResult = processAttackFx(G, ctx.fx, attacker, targetPk, ctx.attack, attackerTypes);
     if (fxResult === 'pendingRetreat' || fxResult === 'pendingTarget') return true;
   } else if (tType === 'sniperBench' || tType === 'swarmSnipe') {
-    var result = calcDamage(G, attacker, targetPk, ctx.attack, sourceTypes);
+    var result = calcDamage(G, attacker, targetPk, ctx.attack, attackerTypes);
     if (result.filtered) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (result.damage > 0) {
