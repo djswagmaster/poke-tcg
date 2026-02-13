@@ -2341,6 +2341,10 @@ function renderBattle() {
   renderFieldSide('oppField', theirP, themNum());
   renderFieldSide('youField', myP, meNum());
 
+  // Update mana display
+  const manaEl = document.getElementById('manaCurrent');
+  if (manaEl) manaEl.textContent = myP.mana;
+
   // Action panel
   renderActionPanel();
   renderHandPanel();

@@ -127,6 +127,14 @@ button { cursor:pointer; font-family:inherit; }
 .bench-slot .fp-info .fp-name { font-size:10px; }
 .bench-slot .fp-info .fp-hp-bar { width:70px; height:5px; }
 
+/* Mana display - bottom left of battle field */
+.mana-display { position:absolute; bottom:10px; left:14px; z-index:10; display:flex; flex-direction:column; align-items:center; gap:2px; background:rgba(6,12,30,0.85); border:2px solid rgba(56,189,248,0.3); border-radius:14px; padding:8px 14px; box-shadow:0 0 20px rgba(56,189,248,0.15), inset 0 0 12px rgba(56,189,248,0.05); backdrop-filter:blur(8px); pointer-events:none; }
+.mana-icon { font-size:28px; color:#38bdf8; line-height:1; filter:drop-shadow(0 0 6px rgba(56,189,248,0.5)); }
+.mana-text { display:flex; align-items:baseline; gap:1px; }
+.mana-current { font-size:26px; font-weight:900; color:#38bdf8; line-height:1; }
+.mana-max { font-size:14px; font-weight:700; color:rgba(56,189,248,0.45); line-height:1; }
+.mana-label { font-size:8px; font-weight:800; letter-spacing:2px; color:rgba(56,189,248,0.5); }
+
 /* Empty bench slot */
 .bench-empty { width:90px; height:124px; border:2px dashed rgba(255,255,255,0.05); border-radius:8px; }
 
