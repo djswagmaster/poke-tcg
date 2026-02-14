@@ -306,7 +306,7 @@ function createGame() {
     log: [],
     events: [],
     targeting: null,
-    pendingRetreat: null,
+    pendingRetreats: [],
     winner: null,
   };
 }
@@ -458,7 +458,7 @@ function handleKO(G, pokemon, ownerPlayerNum) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
-      G.pendingRetreat = { player: ownerPlayerNum, reason: 'ko' };
+      G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
       addLog(G, owner.name + ' must choose new Active!', 'info');
     }
   } else {
@@ -547,6 +547,7 @@ function endTurn(G) {
     var entry = sides[si];
     var pk = entry.side.active;
     if (!pk) continue;
+    if (pk.hp <= 0) continue; // Skip dead pokemon (e.g. double KO)
     var ownerNum = entry.num;
 
     // Poison
@@ -558,22 +559,22 @@ function endTurn(G) {
     }
 
     // Burn
-    if (pk.status.includes('burn')) {
+    if (pk.hp > 0 && pk.status.includes('burn')) {
       var ko2 = dealDamage(G, pk, 20, ownerNum);
       addLog(G, 'Burn deals 20 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', targetPlayer: ownerNum, targetIdx: -1, status: 'burn', damage: 20 });
       if (ko2) handleKO(G, pk, ownerNum);
-      if (pk && pk.status.includes('burn') && Math.random() < 0.5) {
+      if (pk.hp > 0 && pk.status.includes('burn') && Math.random() < 0.5) {
         pk.status = pk.status.filter(function(s) { return s !== 'burn'; });
         addLog(G, pk.name + '\'s burn healed! (Heads)', 'heal');
         G.events.push({ type: 'status_cure', targetPlayer: ownerNum, targetIdx: -1 });
-      } else if (pk && pk.status.includes('burn')) {
+      } else if (pk.hp > 0 && pk.status.includes('burn')) {
         addLog(G, pk.name + ' is still Burned (Tails)', 'info');
       }
     }
 
-    // Sleep
-    if (pk.status.includes('sleep')) {
+    // Sleep (only if alive)
+    if (pk.hp > 0 && pk.status.includes('sleep')) {
       if (Math.random() < 0.5) {
         pk.status = pk.status.filter(function(s) { return s !== 'sleep'; });
         addLog(G, pk.name + ' woke up! (Heads)', 'info');
@@ -588,14 +589,26 @@ function endTurn(G) {
   var allPokemonBoth = [p.active].concat(p.bench).concat([op(G).active]).concat(op(G).bench).filter(Boolean);
   for (var li = 0; li < allPokemonBoth.length; li++) {
     var lpk = allPokemonBoth[li];
-    if (lpk.heldItem === 'Leftovers' && lpk.damage > 0) {
+    if (lpk.heldItem === 'Leftovers' && lpk.damage > 0 && lpk.hp > 0) {
       lpk.damage = Math.max(0, lpk.damage - 10);
       lpk.hp = lpk.maxHp - lpk.damage;
       addLog(G, 'Leftovers heals ' + lpk.name + ' 10', 'heal');
     }
   }
 
+  // If status ticks caused KOs that need retreat selection, mark them so endTurn resumes after
+  if (G.pendingRetreats.length > 0) {
+    for (var ri = 0; ri < G.pendingRetreats.length; ri++) {
+      G.pendingRetreats[ri].duringEndTurn = true;
+    }
+    return;
+  }
+
   // Switch player
+  switchTurn(G);
+}
+
+function switchTurn(G) {
   G.currentPlayer = oppPlayer(G.currentPlayer);
   G.turn++;
   G.events.push({ type: 'turn_overlay', text: G.players[G.currentPlayer].name + "'s Turn" });
@@ -666,7 +679,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
 
   // Self retreat
   if (fx.indexOf('selfRetreat') >= 0 && p.bench.length > 0) {
-    G.pendingRetreat = { player: G.currentPlayer, reason: 'forced', afterEndTurn: true };
+    G.pendingRetreats.push({ player: G.currentPlayer, reason: 'forced', afterEndTurn: true });
     return 'pendingRetreat';
   }
 
@@ -891,7 +904,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
 
   // Baton Pass
   if (fx === 'batonPass' && p.bench.length > 0) {
-    G.pendingRetreat = { player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy };
+    G.pendingRetreats.push({ player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy });
     attacker.attackedThisTurn = true;
     return 'pendingRetreat';
   }
@@ -1050,7 +1063,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, action, logSuffix
   attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
 
-  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+  if (G.pendingRetreats.length === 0 && !G.targeting && !G.winner) {
     endTurn(G);
   }
   return true;
@@ -1242,7 +1255,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(G, attacker, G.currentPlayer);
 
-  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+  if (G.pendingRetreats.length === 0 && !G.targeting && !G.winner) {
     endTurn(G);
   }
   return true;
@@ -1260,7 +1273,7 @@ function doRetreat(G) {
     return false;
   }
 
-  G.pendingRetreat = { player: G.currentPlayer, reason: 'retreat' };
+  G.pendingRetreats.push({ player: G.currentPlayer, reason: 'retreat' });
   return true;
 }
 
@@ -1278,14 +1291,14 @@ function doQuickRetreat(G) {
   }
 
   p.active.energy -= cost;
-  G.pendingRetreat = { player: G.currentPlayer, reason: 'quick' };
+  G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
   addLog(G, 'Quick Retreat (' + cost + ' energy)', 'info');
   return true;
 }
 
 function doSelectBenchForRetreat(G, benchIdx, playerNum) {
-  var pr = G.pendingRetreat;
-  if (!pr) return false;
+  if (G.pendingRetreats.length === 0) return false;
+  var pr = G.pendingRetreats[0];
   // Allow the correct player to select (could be non-current player for KO)
   if (playerNum !== undefined && playerNum !== pr.player) return false;
   var p = G.players[pr.player];
@@ -1306,7 +1319,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   var reason = pr.reason;
   var afterEnd = pr.afterEndTurn;
   var transferEnergy = pr.transferEnergy || 0;
-  G.pendingRetreat = null;
+  G.pendingRetreats.shift(); // Remove the resolved retreat
 
   if (reason === 'batonPass' && transferEnergy > 0) {
     var oldActive = p.bench[p.bench.length - 1];
@@ -1314,6 +1327,17 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
     var gained = Math.min(transferEnergy, 5 - newActive.energy);
     newActive.energy += gained;
     addLog(G, 'Baton Pass: ' + newActive.name + ' gained ' + gained + ' energy!', 'effect');
+  }
+
+  // If more pending retreats remain (e.g. double KO), let the next one resolve first
+  if (G.pendingRetreats.length > 0) {
+    return true;
+  }
+
+  // If this retreat was triggered during endTurn (status tick KO), just switch turns
+  if (pr.duringEndTurn) {
+    switchTurn(G);
+    return true;
   }
 
   if (reason === 'retreat') {
@@ -1524,7 +1548,7 @@ function doUseAbility(G, key) {
     if (!p.active || p.bench.length === 0) return false;
     if (!(getPokemonData(p.active.name).ability && getPokemonData(p.active.name).ability.key === 'phantomWalk')) return false;
     p.usedAbilities[key] = true;
-    G.pendingRetreat = { player: G.currentPlayer, reason: 'quick' };
+    G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
     addLog(G, 'Illusory Getaway: free retreat!', 'effect');
     return true;
   }
@@ -1680,7 +1704,7 @@ function processAction(G, playerNum, action) {
   // All other actions require being the current player
   if (G.phase !== 'battle') return false;
   if (G.currentPlayer !== playerNum) return false;
-  if (G.pendingRetreat || G.targeting) return false; // Must resolve pending state first
+  if (G.pendingRetreats.length > 0 || G.targeting) return false; // Must resolve pending state first
 
   switch (action.type) {
     case 'attack': return doAttack(G, action.attackIndex, action);

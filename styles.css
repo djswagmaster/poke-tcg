@@ -109,6 +109,16 @@ button { cursor:pointer; font-family:inherit; }
 .field-pokemon .fp-img.clickable:hover { border-color:#818cf8; }
 .field-pokemon .fp-held-item { width:32px; border-radius:4px; border:1px solid rgba(168,85,247,0.4); position:absolute; bottom:2px; right:-16px; box-shadow:0 0 6px rgba(168,85,247,0.3); }
 
+/* Card selection & glow effects */
+.field-pokemon.selected-card .fp-img { border-color:#818cf8; box-shadow:0 0 12px rgba(129,140,248,0.5); }
+.field-pokemon.glow-attack .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.35); border-color:rgba(250,204,21,0.4); }
+.field-pokemon.glow-ability .fp-img { box-shadow:0 0 10px rgba(129,140,248,0.35); border-color:rgba(129,140,248,0.4); }
+.field-pokemon.glow-attack.glow-ability .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.3), 0 0 18px rgba(129,140,248,0.25); border-color:rgba(250,204,21,0.4); }
+.field-pokemon.selected-card.glow-attack .fp-img { box-shadow:0 0 14px rgba(250,204,21,0.5); border-color:#fde047; }
+.field-pokemon.selected-card.glow-ability .fp-img { box-shadow:0 0 14px rgba(129,140,248,0.5); border-color:#818cf8; }
+@keyframes glowPulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
+.field-pokemon.glow-attack .fp-img, .field-pokemon.glow-ability .fp-img { animation:glowPulse 2s ease-in-out infinite; }
+
 @keyframes pulse { 0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,0.4); } 50% { box-shadow:0 0 0 8px rgba(245,158,11,0); } }
 
 .fp-info { display:flex; flex-direction:column; align-items:center; gap:2px; pointer-events:none; margin-top:4px; }

@@ -275,7 +275,8 @@ const G = {
   log: [],
   targeting: null, // {type,callback}
   animating: false,
-  pendingRetreat: null,
+  pendingRetreats: [],
+  selectedCard: null, // {playerNum, benchIdx} where benchIdx=-1 means active
 };
 
 // Track previous HP percentages for smooth bar transitions
@@ -669,6 +670,13 @@ function handleKO(pokemon, ownerPlayerNum) {
   scorer.kos++;
   addLog(`${pokemon.name} is KO'd! (${scorer.name}: ${scorer.kos}/5 KOs)`, 'ko');
 
+  // Clear card selection if the KO'd pokemon was selected
+  if (G.selectedCard) {
+    const selP = G.players[G.selectedCard.playerNum];
+    const selPk = G.selectedCard.benchIdx === -1 ? selP.active : selP.bench[G.selectedCard.benchIdx];
+    if (selPk === pokemon) G.selectedCard = null;
+  }
+
   // Rescue Scarf
   if (pokemon.heldItem === 'Rescue Scarf') {
     owner.hand.push({name: pokemon.name, type:'pokemon', heldItem: null});
@@ -686,7 +694,7 @@ function handleKO(pokemon, ownerPlayerNum) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
-      G.pendingRetreat = { player: ownerPlayerNum, reason: 'ko' };
+      G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
       addLog(`${owner.name} must choose new Active!`, 'info');
     }
   } else {
@@ -706,6 +714,8 @@ function startTurn() {
   const manaGained = p.mana - oldMana;
   if (manaGained > 0) showManaPopup(manaGained);
   p.usedAbilities = {};
+  // Auto-select active at start of turn
+  G.selectedCard = { playerNum: G.currentPlayer, benchIdx: -1 };
   // Clear Ditto's improvise at start of new turn
   if (p.active) p.active.improviseActive = false;
   G.targeting = null;
@@ -787,6 +797,8 @@ async function endTurn() {
     const ownerNum = side === p ? G.currentPlayer : opp(G.currentPlayer);
     const sideSelector = side === p ? '#youField .active-slot' : '#oppField .active-slot';
 
+    if (pk.hp <= 0) continue; // Skip dead pokemon (e.g. double KO)
+
     // Poison: 10 damage
     if (pk.status.includes('poison')) {
       spawnParticlesAtEl(sideSelector, '#A33EA1', 10, {spread:40, size:5});
@@ -805,7 +817,7 @@ async function endTurn() {
     }
 
     // Burn: 20 damage, 50/50 cleanse
-    if (pk.status.includes('burn')) {
+    if (pk.hp > 0 && pk.status.includes('burn')) {
       spawnParticlesAtEl(sideSelector, '#EE8130', 12, {spread:45, size:5});
       animateEl(sideSelector, 'status-apply', 500);
       const ko = dealDamage(pk, 20, ownerNum);
@@ -819,19 +831,19 @@ async function endTurn() {
         handleKO(pk, ownerNum);
         await delay(400);
       }
-      if (pk && pk.status.includes('burn') && Math.random() < 0.5) {
+      if (pk.hp > 0 && pk.status.includes('burn') && Math.random() < 0.5) {
         pk.status = pk.status.filter(s => s !== 'burn');
         addLog(`${pk.name}'s burn healed! (Heads)`, 'heal');
         animateEl(sideSelector, 'status-cure', 500);
         renderBattle();
         await delay(400);
-      } else if (pk && pk.status.includes('burn')) {
+      } else if (pk.hp > 0 && pk.status.includes('burn')) {
         addLog(`${pk.name} is still Burned (Tails)`, 'info');
       }
     }
 
-    // Sleep: 50/50 coin flip to cure
-    if (pk.status.includes('sleep')) {
+    // Sleep: 50/50 coin flip to cure (only if alive)
+    if (pk.hp > 0 && pk.status.includes('sleep')) {
       if (Math.random() < 0.5) {
         pk.status = pk.status.filter(s => s !== 'sleep');
         addLog(`${pk.name} woke up! (Heads)`, 'info');
@@ -848,7 +860,7 @@ async function endTurn() {
   for (const [pNum, pObj] of [[G.currentPlayer, p], [opp(G.currentPlayer), op()]]) {
     const allPk = [pObj.active, ...pObj.bench].filter(Boolean);
     for (const pk of allPk) {
-      if (pk.heldItem === 'Leftovers' && pk.damage > 0) {
+      if (pk.heldItem === 'Leftovers' && pk.damage > 0 && pk.hp > 0) {
         pk.damage = Math.max(0, pk.damage - 10);
         pk.hp = pk.maxHp - pk.damage;
         const sel = getPokemonSelector(pNum, pk === pObj.active ? -1 : pObj.bench.indexOf(pk));
@@ -859,9 +871,21 @@ async function endTurn() {
     }
   }
 
+  // If status ticks caused KOs that need retreat selection, mark them so endTurn resumes after
+  if (G.pendingRetreats.length > 0) {
+    G.pendingRetreats.forEach(pr => { pr.duringEndTurn = true; });
+    G.animating = false;
+    renderBattle();
+    return;
+  }
+
   // Switch player
   renderBattle();
   await delay(500);
+  switchTurn();
+}
+
+async function switchTurn() {
   G.currentPlayer = opp(G.currentPlayer);
   G.turn++;
   G.animating = false;
@@ -1000,7 +1024,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
 
   // Self retreat
   if (fx.includes('selfRetreat') && p.bench.length > 0) {
-    G.pendingRetreat = { player: G.currentPlayer, reason: 'forced', afterEndTurn: true };
+    G.pendingRetreats.push({ player: G.currentPlayer, reason: 'forced', afterEndTurn: true });
     renderBattle();
     return 'pendingRetreat';
   }
@@ -1283,7 +1307,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
 
   // Baton Pass
   if (fx === 'batonPass' && p.bench.length > 0) {
-    G.pendingRetreat = { player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy };
+    G.pendingRetreats.push({ player: G.currentPlayer, reason: 'batonPass', afterEndTurn: true, transferEnergy: attacker.energy });
     attacker.attackedThisTurn = true;
     renderBattle();
     return 'pendingRetreat';
@@ -1499,7 +1523,7 @@ async function executeAttackClient(attacker, attack, attackerTypes, fx, p) {
   // Sustained + self-KO + endTurn
   attacker.attackedThisTurn = true;
   if (attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+  if (G.pendingRetreats.length === 0 && !G.targeting && !G.winner) {
     await endTurn();
   }
 }
@@ -1609,7 +1633,7 @@ function actionRetreat() {
     return;
   }
 
-  G.pendingRetreat = { player: G.currentPlayer, reason: 'retreat' };
+  G.pendingRetreats.push({ player: G.currentPlayer, reason: 'retreat' });
   renderBattle();
 }
 
@@ -1630,15 +1654,15 @@ function actionQuickRetreat() {
   }
 
   p.active.energy -= cost;
-  G.pendingRetreat = { player: G.currentPlayer, reason: 'quick' };
+  G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
   addLog(`Quick Retreat (${cost} energy)`, 'info');
   renderBattle();
 }
 
 async function selectBenchForRetreat(idx) {
   if (isOnline) { sendAction({ actionType: 'selectBenchForRetreat', benchIdx: idx }); return; }
-  const pr = G.pendingRetreat;
-  if (!pr) return;
+  if (G.pendingRetreats.length === 0) return;
+  const pr = G.pendingRetreats[0];
   const p = G.players[pr.player];
   const newActive = p.bench[idx];
   if (!newActive) return;
@@ -1666,7 +1690,7 @@ async function selectBenchForRetreat(idx) {
   const reason = pr.reason;
   const afterEnd = pr.afterEndTurn;
   const transferEnergy = pr.transferEnergy || 0;
-  G.pendingRetreat = null;
+  G.pendingRetreats.shift(); // Remove the resolved retreat
 
   // Baton Pass energy transfer - move energy from old active to new active
   if (reason === 'batonPass' && transferEnergy > 0) {
@@ -1676,6 +1700,20 @@ async function selectBenchForRetreat(idx) {
     const gained = Math.min(transferEnergy, 5 - newActive.energy);
     newActive.energy += gained;
     addLog(`Baton Pass: ${newActive.name} gained ${gained} energy!`, 'effect');
+  }
+
+  // If more pending retreats remain (e.g. double KO), let the next one resolve first
+  if (G.pendingRetreats.length > 0) {
+    renderBattle();
+    return;
+  }
+
+  // If this retreat was triggered during endTurn (status tick KO), just switch turns
+  if (pr.duringEndTurn) {
+    renderBattle();
+    await delay(500);
+    await switchTurn();
+    return;
   }
 
   if (reason === 'retreat') {
@@ -1720,7 +1758,7 @@ async function finalizeAttack() {
   const attacker = p.active;
   if (attacker) attacker.attackedThisTurn = true;
   if (attacker && attacker.hp <= 0) handleKO(attacker, G.currentPlayer);
-  if (!G.pendingRetreat && !G.targeting && !G.winner) {
+  if (G.pendingRetreats.length === 0 && !G.targeting && !G.winner) {
     await endTurn();
   }
 }
@@ -2372,8 +2410,8 @@ function renderBattle() {
   document.getElementById('btP1Mana').textContent = G.players[1].mana + '⬡';
   document.getElementById('btP2Mana').textContent = G.players[2].mana + '⬡';
   let turnText = `Turn ${G.turn} — ${cp().name}`;
-  if (G.pendingRetreat && G.pendingRetreat.reason === 'ko') {
-    const prPlayer = G.players[G.pendingRetreat.player];
+  if (G.pendingRetreats.length > 0 && G.pendingRetreats[0].reason === 'ko') {
+    const prPlayer = G.players[G.pendingRetreats[0].player];
     turnText = `Turn ${G.turn} — ${prPlayer.name} must choose new Active`;
   } else if (isOnline && !isMyTurn()) {
     turnText += ' (Waiting...)';
@@ -2418,7 +2456,7 @@ function renderFieldSide(containerId, player, playerNum) {
   for (let i = 0; i < benchSlots; i++) {
     const pk = player.bench[i];
     if (pk) {
-      const isRetreatTarget = G.pendingRetreat && G.pendingRetreat.player === playerNum && (!isOnline || playerNum === myPlayerNum);
+      const isRetreatTarget = G.pendingRetreats.length > 0 && G.pendingRetreats[0].player === playerNum && (!isOnline || playerNum === myPlayerNum);
       benchHtml += renderPokemonSlot(pk, 'bench-slot', playerNum, i, isRetreatTarget);
     } else {
       benchHtml += '<div class="bench-empty"></div>';
@@ -2440,15 +2478,49 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   const isTarget = G.targeting && G.targeting.validTargets.some(t => t.player === playerNum && t.idx === benchIdx);
   const hpPct = Math.max(0, (pk.hp / pk.maxHp) * 100);
   const hpColor = hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444';
-  const clickable = isRetreatTarget ? `onclick="selectBenchForRetreat(${benchIdx})"` : (isTarget ? `onclick="selectTarget(${playerNum},${benchIdx})"` : '');
-  const targetClass = (isRetreatTarget || isTarget) ? 'targetable' : (slotClass === 'active-slot' && playerNum === meNum() ? 'clickable' : '');
+
+  // Determine click behavior: targeting/retreat takes priority, then card selection
+  let clickAction, imgClass;
+  if (isRetreatTarget) {
+    clickAction = `onclick="selectBenchForRetreat(${benchIdx})"`;
+    imgClass = 'targetable';
+  } else if (isTarget) {
+    clickAction = `onclick="selectTarget(${playerNum},${benchIdx})"`;
+    imgClass = 'targetable';
+  } else {
+    clickAction = `onclick="event.stopPropagation();selectCard(${playerNum},${benchIdx})"`;
+    imgClass = 'clickable';
+  }
+
+  // Determine glow: yellow for active that can attack, blue for usable ability
+  const isMine = playerNum === meNum();
+  const isMyTurnNow = isOnline ? isMyTurn() : true;
+  let glowClass = '';
+  if (isMine && isMyTurnNow && !G.animating && G.pendingRetreats.length === 0 && !G.targeting) {
+    const data = getPokemonData(pk.name);
+    const me = isOnline ? G.players[myPlayerNum] : cp();
+    // Yellow glow: active pokemon that has an affordable attack
+    if (benchIdx === -1 && data.attacks && data.attacks.some(atk => pk.energy >= atk.energy && !pk.status.includes('sleep'))) {
+      glowClass = 'glow-attack';
+    }
+    // Blue glow: has usable active ability
+    if (data.ability && data.ability.type === 'active') {
+      const used = me.usedAbilities[data.ability.key];
+      const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+      if (canUse) glowClass += (glowClass ? ' ' : '') + 'glow-ability';
+    }
+  }
+
+  // Selected state
+  const isSelected = G.selectedCard && G.selectedCard.playerNum === playerNum && G.selectedCard.benchIdx === benchIdx;
+  const selectedClass = isSelected ? 'selected-card' : '';
 
   let statusHtml = '';
   if (pk.status.length > 0) statusHtml = pk.status.map(s => `<span class="fp-status ${s}">${s.toUpperCase()}</span>`).join(' ');
 
-  return `<div class="field-pokemon ${slotClass}">
+  return `<div class="field-pokemon ${slotClass} ${glowClass} ${selectedClass}">
     <div class="fp-img-wrap">
-      <img class="fp-img ${targetClass}" src="${getImg(pk.name)}" alt="${pk.name}" ${(isRetreatTarget || isTarget) ? clickable : `onclick="event.stopPropagation();zoomCard('${pk.name.replace(/'/g,"\\'")}')"`}>
+      <img class="fp-img ${imgClass}" src="${getImg(pk.name)}" alt="${pk.name}" ${clickAction}>
       ${pk.heldItem ? `<img class="fp-held-item" src="${getImg(pk.heldItem)}" alt="${pk.heldItem}" title="${pk.heldItem}" onclick="event.stopPropagation();zoomCard('${pk.heldItem.replace(/'/g,"\\'")}')" style="cursor:pointer">` : ''}
     </div>
     <div class="fp-info">
@@ -2465,44 +2537,79 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
 
 function renderActionPanel() {
   const panel = document.getElementById('apActions');
-  const myPendingRetreat = G.pendingRetreat && G.pendingRetreat.player === myPlayerNum;
-  const oppPendingRetreat = isOnline && G.pendingRetreat && G.pendingRetreat.player !== myPlayerNum;
+  const info = document.getElementById('apPokemonInfo');
+  const myPendingRetreat = G.pendingRetreats.length > 0 && G.pendingRetreats[0].player === myPlayerNum;
+  const oppPendingRetreat = isOnline && G.pendingRetreats.length > 0 && G.pendingRetreats[0].player !== myPlayerNum;
   if (isOnline && ((!isMyTurn() && !myPendingRetreat) || oppPendingRetreat)) {
+    info.innerHTML = '';
     panel.innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
     return;
   }
   const me = isOnline ? G.players[myPlayerNum] : cp();
-  const pk = me.active;
-  if (!pk) { panel.innerHTML = '<div style="color:#555;padding:20px">No Active Pokémon</div>'; return; }
-  const data = getPokemonData(pk.name);
 
-  // Pokemon info
-  const info = document.getElementById('apPokemonInfo');
+  // Targeting mode - override everything
+  if (G.targeting) {
+    info.innerHTML = '';
+    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET <button onclick="G.targeting=null;G.animating=false;renderBattle()" style="margin-left:8px;padding:2px 10px;border:none;border-radius:6px;background:rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:10px">Cancel</button></div>`;
+    return;
+  }
+
+  // Pending retreat - override everything
+  if (G.pendingRetreats.length > 0) {
+    info.innerHTML = '';
+    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A BENCH POKÉMON TO BECOME ACTIVE</div>`;
+    return;
+  }
+
+  // Determine which card is selected
+  const sel = G.selectedCard;
+  const myNum = meNum();
+
+  // If nothing selected, show prompt
+  if (!sel) {
+    info.innerHTML = '';
+    let html = '<div style="color:#555;padding:20px;text-align:center;font-size:13px">Click a Pokémon to see info & actions</div>';
+    // Still show End Turn and copiedAttacks reset
+    copiedAttacks = [];
+    html += renderEndTurnButton(me);
+    panel.innerHTML = html;
+    return;
+  }
+
+  // Get the selected pokemon
+  const selPlayer = G.players[sel.playerNum];
+  const selPk = sel.benchIdx === -1 ? selPlayer.active : selPlayer.bench[sel.benchIdx];
+  if (!selPk) { G.selectedCard = null; info.innerHTML = ''; panel.innerHTML = ''; return; }
+  const selData = getPokemonData(selPk.name);
+  const isMine = sel.playerNum === myNum;
+  const isActive = sel.benchIdx === -1;
+
+  // Show card info (always)
+  const discardBtn = isMine && selPk.heldItem
+    ? `<button onclick="discardHeldItem('${isActive ? 'active' : 'bench'}',${isActive ? null : sel.benchIdx})" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button>`
+    : '';
   info.innerHTML = `
-    <div class="ap-pokemon-name">${pk.name}</div>
-    <div class="ap-pokemon-types">${data.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
-    <div class="ap-pokemon-hp">HP: ${pk.hp}/${pk.maxHp} | Energy: ${pk.energy}/5 | Mana: ${me.mana}/10</div>
-    ${pk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${pk.heldItem} <button onclick="discardHeldItem('active',null)" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button></div>` : ''}
-    ${pk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${pk.status.join(', ')}</div>` : ''}
+    <div class="ap-pokemon-name">${selPk.name}${!isMine ? ' <span style="color:#ef4444;font-size:10px">(Enemy)</span>' : ''}</div>
+    <div class="ap-pokemon-types">${selData.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
+    <div class="ap-pokemon-hp">HP: ${selPk.hp}/${selPk.maxHp} | Energy: ${selPk.energy}/5</div>
+    ${selPk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${selPk.heldItem} ${discardBtn}</div>` : ''}
+    ${selPk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${selPk.status.join(', ')}</div>` : ''}
+    ${selData.ability ? `<div style="font-size:10px;color:#c4b5fd">✦ ${selData.ability.name}: ${selData.ability.desc} <span style="opacity:0.6">[${selData.ability.type}]</span></div>` : ''}
+    <div style="font-size:10px;color:#888;margin-top:2px">${selData.attacks.map(a => `${a.name} (${a.energy}⚡${a.baseDmg ? ', ' + a.baseDmg + 'dmg' : ''})`).join(' · ')}</div>
   `;
 
   let html = '';
+  copiedAttacks = [];
 
-  // Targeting mode?
-  if (G.targeting) {
-    html += `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET <button onclick="G.targeting=null;G.animating=false;renderBattle()" style="margin-left:8px;padding:2px 10px;border:none;border-radius:6px;background:rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:10px">Cancel</button></div>`;
+  // If enemy card, just show info (no actions)
+  if (!isMine) {
+    html += '<div style="color:#888;padding:8px;font-size:11px;text-align:center">Enemy Pokémon — info only</div>';
+    html += renderEndTurnButton(me);
     panel.innerHTML = html;
     return;
   }
 
-  // Pending retreat?
-  if (G.pendingRetreat) {
-    html += `<div class="ap-section-label" style="color:#f59e0b">SELECT A BENCH POKÉMON TO BECOME ACTIVE</div>`;
-    panel.innerHTML = html;
-    return;
-  }
-
-  // Check if opponent's Active has Thick Aroma (increases our attack energy cost by 1)
+  // Check if opponent's Active has Thick Aroma
   let thickAromaCost = 0;
   const them = isOnline ? G.players[isOnline ? (myPlayerNum === 1 ? 2 : 1) : opp(G.currentPlayer)] : op();
   if (them.active && !isPassiveBlocked()) {
@@ -2510,133 +2617,170 @@ function renderActionPanel() {
     if (themData.ability && themData.ability.key === 'thickAroma') thickAromaCost = 1;
   }
 
-  // Attacks
-  html += '<div class="ap-section-label">ATTACKS</div>';
-  data.attacks.forEach((atk, i) => {
-    let cost = atk.energy;
-    if (pk.quickClawActive) cost = Math.max(0, cost - 2);
-    cost += thickAromaCost;
-    const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
-    const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-    const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-    html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
-      <span class="atk-name">${atk.name}${dmgLabel}</span>
-      <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
-    </button>`;
-  });
+  // === MY ACTIVE POKEMON SELECTED ===
+  if (isActive && me.active === selPk) {
+    const pk = selPk;
+    const data = selData;
 
-  // Mew Versatility (passive) - show bench allies' attacks as usable
-  copiedAttacks = [];
-  if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked()) {
-    me.bench.forEach(benchPk => {
-      const bd = getPokemonData(benchPk.name);
-      bd.attacks.forEach((atk, atkIdx) => {
+    // Attacks
+    html += '<div class="ap-section-label">ATTACKS</div>';
+    data.attacks.forEach((atk, i) => {
+      let cost = atk.energy;
+      if (pk.quickClawActive) cost = Math.max(0, cost - 2);
+      cost += thickAromaCost;
+      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
+      const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+      const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+      html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
+        <span class="atk-name">${atk.name}${dmgLabel}</span>
+        <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
+      </button>`;
+    });
+
+    // Mew Versatility - show bench allies' attacks
+    if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked()) {
+      me.bench.forEach(benchPk => {
+        const bd = getPokemonData(benchPk.name);
+        bd.attacks.forEach((atk, atkIdx) => {
+          const idx = copiedAttacks.length;
+          copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
+          const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
+          const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+          const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
+            <span class="atk-name">${atk.name}${cdmg}</span>
+            <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
+          </button>`;
+        });
+      });
+    }
+
+    // Ditto Improvise
+    if (pk.improviseActive && op().active) {
+      const oppData = getPokemonData(op().active.name);
+      html += '<div class="ap-section-label" style="color:#c4b5fd">COPIED ATTACKS</div>';
+      oppData.attacks.forEach((atk, atkIdx) => {
         const idx = copiedAttacks.length;
-        copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
+        copiedAttacks.push({ attack: atk, types: oppData.types, source: op().active.name, attackIndex: atkIdx });
         const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
-        const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-        const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+        const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+        const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
         html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
-          <span class="atk-name">${atk.name}${cdmg}</span>
-          <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
+          <span class="atk-name">${atk.name}${cdmg2}</span>
+          <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
         </button>`;
       });
-    });
-  }
-
-  // Ditto Improvise - when activated, show opponent's attacks
-  if (pk.improviseActive && op().active) {
-    const oppData = getPokemonData(op().active.name);
-    html += '<div class="ap-section-label" style="color:#c4b5fd">COPIED ATTACKS</div>';
-    oppData.attacks.forEach((atk, atkIdx) => {
-      const idx = copiedAttacks.length;
-      copiedAttacks.push({ attack: atk, types: oppData.types, source: op().active.name, attackIndex: atkIdx });
-      const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
-      const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-      const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-      html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${atk.name}${cdmg2}</span>
-        <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
-      </button>`;
-    });
-  }
-
-  // Abilities (dedicated section)
-  const activeAbilities = [];
-  const passiveAbilities = [];
-  if (data.ability) {
-    if (data.ability.type === 'active') {
-      activeAbilities.push({ key: data.ability.key, name: data.ability.name, desc: data.ability.desc, owner: pk.name, isActive: true });
-    } else if (data.ability.type === 'passive') {
-      passiveAbilities.push({ name: data.ability.name, desc: data.ability.desc, owner: pk.name });
     }
-  }
-  me.bench.forEach(benchPk => {
-    const bd = getPokemonData(benchPk.name);
-    if (bd.ability) {
-      if (bd.ability.type === 'active' && bd.ability.key !== 'improvise') {
-        activeAbilities.push({ key: bd.ability.key, name: bd.ability.name, desc: bd.ability.desc, owner: benchPk.name, isActive: false });
-      } else if (bd.ability.type === 'passive') {
-        passiveAbilities.push({ name: bd.ability.name, desc: bd.ability.desc, owner: benchPk.name });
+
+    // Ability (only this pokemon's)
+    if (data.ability) {
+      if (data.ability.type === 'active') {
+        const used = me.usedAbilities[data.ability.key];
+        const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+        html += '<div class="ap-section-label">ABILITY</div>';
+        html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
+          <span class="atk-name">${data.ability.name}</span>
+          <span class="atk-detail">${data.ability.desc}</span>
+        </button>`;
+      } else if (data.ability.type === 'passive') {
+        html += '<div class="ap-section-label">ABILITY</div>';
+        html += `<div class="ap-btn" style="opacity:0.6;cursor:default;border-left:3px solid #6366f1">
+          <span class="atk-name">${data.ability.name}</span>
+          <span class="atk-detail" style="color:#a5b4fc">${data.ability.desc} [Passive]</span>
+        </div>`;
       }
     }
-  });
-  if (activeAbilities.length > 0 || passiveAbilities.length > 0) {
-    html += '<div class="ap-section-label">ABILITIES</div>';
-    activeAbilities.forEach(ab => {
-      const used = me.usedAbilities[ab.key];
-      const canUse = !used || ab.key === 'healingTouch' || ab.key === 'magicDrain';
-      const ownerLabel = ab.isActive ? '' : ` (${ab.owner})`;
-      html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${ab.key}')" ${canUse?'':'disabled'}>
-        <span class="atk-name">${ab.name}${ownerLabel}</span>
-        <span class="atk-detail">${ab.desc}</span>
-      </button>`;
-    });
-    passiveAbilities.forEach(ab => {
-      html += `<div class="ap-btn" style="opacity:0.6;cursor:default;border-left:3px solid #6366f1">
-        <span class="atk-name">${ab.name} (${ab.owner})</span>
-        <span class="atk-detail" style="color:#a5b4fc">${ab.desc} [Passive]</span>
-      </div>`;
-    });
-  }
 
-  // Energy grant
-  html += '<div class="ap-section-label">ENERGY</div>';
-  const mePlayerNum = isOnline ? myPlayerNum : G.currentPlayer;
-  const allMine = [me.active, ...me.bench].filter(Boolean);
-  allMine.forEach(target => {
-    const isSlowStart = getPokemonData(target.name).ability?.key === 'slowStart' && !isPassiveBlocked();
+    // Energy grant for this pokemon
+    html += '<div class="ap-section-label">ENERGY</div>';
+    const myPN = isOnline ? myPlayerNum : G.currentPlayer;
+    const isSlowStart = getPokemonData(pk.name).ability?.key === 'slowStart' && !isPassiveBlocked();
     const cost = isSlowStart ? 2 : 1;
-    const canGrant = me.mana >= cost && target.energy < 5;
-    html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${mePlayerNum}].${target === me.active ? 'active' : `bench[${me.bench.indexOf(target)}]`})" ${canGrant?'':'disabled'}>
-      <span class="atk-name">+1 Energy → ${target.name}</span>
-      <span class="atk-detail">${cost} mana${isSlowStart?' (Slow Start)':''} | ${target.energy}/5</span>
+    const canGrant = me.mana >= cost && pk.energy < 5;
+    html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${myPN}].active)" ${canGrant?'':'disabled'}>
+      <span class="atk-name">+1 Energy → ${pk.name}</span>
+      <span class="atk-detail">${cost} mana${isSlowStart?' (Slow Start)':''} | ${pk.energy}/5</span>
     </button>`;
-  });
 
-  // Retreat
-  html += '<div class="ap-section-label">MOVEMENT</div>';
-  const qrCost = pk.heldItem === 'Float Stone' ? 1 : 2;
-  html += `<button class="ap-btn ap-btn-retreat" onclick="actionQuickRetreat()" ${me.bench.length > 0 && pk.energy >= qrCost ? '' : 'disabled'}>
-    <span class="atk-name">Quick Retreat</span><span class="atk-detail">${qrCost} energy, don't end turn</span>
-  </button>`;
-  html += `<button class="ap-btn ap-btn-retreat" onclick="actionRetreat()" ${me.bench.length > 0 ? '' : 'disabled'}>
-    <span class="atk-name">Retreat</span><span class="atk-detail">Ends turn</span>
-  </button>`;
+    // Retreat
+    html += '<div class="ap-section-label">MOVEMENT</div>';
+    const qrCost = pk.heldItem === 'Float Stone' ? 1 : 2;
+    html += `<button class="ap-btn ap-btn-retreat" onclick="actionQuickRetreat()" ${me.bench.length > 0 && pk.energy >= qrCost ? '' : 'disabled'}>
+      <span class="atk-name">Quick Retreat</span><span class="atk-detail">${qrCost} energy, don't end turn</span>
+    </button>`;
+    html += `<button class="ap-btn ap-btn-retreat" onclick="actionRetreat()" ${me.bench.length > 0 ? '' : 'disabled'}>
+      <span class="atk-name">Retreat</span><span class="atk-detail">Ends turn</span>
+    </button>`;
 
-  // Held items on bench (discard option)
-  const benchWithItems = me.bench.filter(bpk => bpk.heldItem);
-  if (benchWithItems.length > 0) {
-    html += '<div class="ap-section-label">BENCH ITEMS</div>';
-    benchWithItems.forEach(bpk => {
-      const bIdx = me.bench.indexOf(bpk);
-      html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx})" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${bpk.name}: ${bpk.heldItem}</span><span class="atk-detail">Click to discard</span>
+    // Held item discard
+    if (pk.heldItem) {
+      html += '<div class="ap-section-label">ITEM</div>';
+      html += `<button class="ap-btn" onclick="discardHeldItem('active',null)" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+        <span class="atk-name">${pk.heldItem}</span><span class="atk-detail">Click to discard</span>
       </button>`;
-    });
+    }
+  }
+  // === MY BENCH POKEMON SELECTED ===
+  else if (!isActive && me.bench.includes(selPk)) {
+    const bIdx = sel.benchIdx;
+    const data = selData;
+
+    // Energy grant
+    html += '<div class="ap-section-label">ENERGY</div>';
+    const myPN = isOnline ? myPlayerNum : G.currentPlayer;
+    const isSlowStart = data.ability?.key === 'slowStart' && !isPassiveBlocked();
+    const cost = isSlowStart ? 2 : 1;
+    const canGrant = me.mana >= cost && selPk.energy < 5;
+    html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${myPN}].bench[${bIdx}])" ${canGrant?'':'disabled'}>
+      <span class="atk-name">+1 Energy → ${selPk.name}</span>
+      <span class="atk-detail">${cost} mana${isSlowStart?' (Slow Start)':''} | ${selPk.energy}/5</span>
+    </button>`;
+
+    // Ability (if this bench pokemon has an active ability)
+    if (data.ability && data.ability.type === 'active' && data.ability.key !== 'improvise') {
+      const used = me.usedAbilities[data.ability.key];
+      const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+      html += '<div class="ap-section-label">ABILITY</div>';
+      html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
+        <span class="atk-name">${data.ability.name}</span>
+        <span class="atk-detail">${data.ability.desc}</span>
+      </button>`;
+    } else if (data.ability && data.ability.type === 'passive') {
+      html += '<div class="ap-section-label">ABILITY</div>';
+      html += `<div class="ap-btn" style="opacity:0.6;cursor:default;border-left:3px solid #6366f1">
+        <span class="atk-name">${data.ability.name}</span>
+        <span class="atk-detail" style="color:#a5b4fc">${data.ability.desc} [Passive]</span>
+      </div>`;
+    }
+
+    // Held item discard
+    if (selPk.heldItem) {
+      html += '<div class="ap-section-label">ITEM</div>';
+      html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx})" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+        <span class="atk-name">${selPk.heldItem}</span><span class="atk-detail">Click to discard</span>
+      </button>`;
+    }
+
+    // Show attacks (info-only, can't use from bench)
+    if (data.attacks.length > 0) {
+      html += '<div class="ap-section-label" style="opacity:0.5">ATTACKS (must be Active)</div>';
+      data.attacks.forEach(atk => {
+        const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+        html += `<div class="ap-btn ap-btn-attack" style="opacity:0.35;cursor:default">
+          <span class="atk-name">${atk.name}${dmgLabel}</span>
+          <span class="atk-detail">${atk.energy}⚡${atk.desc ? ' | ' + atk.desc : ''}</span>
+        </div>`;
+      });
+    }
   }
 
-  // End turn
+  // End turn button always shown
+  html += renderEndTurnButton(me);
+  panel.innerHTML = html;
+}
+
+function renderEndTurnButton(me) {
+  let html = '<div class="ap-section-label" style="margin-top:8px">TURN</div>';
   if (isOnline) {
     html += `<button class="ap-btn ap-btn-end" onclick="sendAction({actionType:'endTurn'})" ${isMyTurn()?'':'disabled'}>
       <span class="atk-name">End Turn</span>
@@ -2646,8 +2790,7 @@ function renderActionPanel() {
       <span class="atk-name">End Turn</span>
     </button>`;
   }
-
-  panel.innerHTML = html;
+  return html;
 }
 
 function renderHandPanel() {
@@ -2688,6 +2831,19 @@ function zoomCard(name) {
 }
 function closeZoom() { document.getElementById('zoomOverlay').classList.remove('visible'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeZoom(); });
+
+// ---------- CARD SELECTION ----------
+function selectCard(playerNum, benchIdx) {
+  // If targeting or pending retreat, don't change selection
+  if (G.targeting || G.pendingRetreats.length > 0) return;
+  // Toggle off if re-clicking same card
+  if (G.selectedCard && G.selectedCard.playerNum === playerNum && G.selectedCard.benchIdx === benchIdx) {
+    G.selectedCard = null;
+  } else {
+    G.selectedCard = { playerNum, benchIdx };
+  }
+  renderBattle();
+}
 
 // ---------- DRAG TO PAN ----------
 function enableDragPan(el) {
@@ -2862,8 +3018,13 @@ function applyServerState(state) {
   G.turn = state.turn;
   G.log = state.log || [];
   G.targeting = state.targeting || null;
-  G.pendingRetreat = state.pendingRetreat || null;
+  G.pendingRetreats = state.pendingRetreats || (state.pendingRetreat ? [state.pendingRetreat] : []);
   G.winner = state.winner || null;
+
+  // Auto-select active card when it's my turn (online)
+  if (state.currentPlayer === myPlayerNum && !G.selectedCard) {
+    G.selectedCard = { playerNum: myPlayerNum, benchIdx: -1 };
+  }
 
   for (let pNum = 1; pNum <= 2; pNum++) {
     const sp = state.players[pNum];
