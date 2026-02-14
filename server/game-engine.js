@@ -374,7 +374,10 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   }
 
   var ignoreRes = fx.indexOf('ignoreRes') >= 0;
-  var mult = calcWeaknessResistance(G, attackerTypes, defender);
+  // Lucky Punch: add Normal type for weakness calc
+  var effectiveTypes = attackerTypes;
+  if (luckyProc && attackerTypes.indexOf('Normal') < 0) effectiveTypes = attackerTypes.concat(['Normal']);
+  var mult = calcWeaknessResistance(G, effectiveTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
   // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
   if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;

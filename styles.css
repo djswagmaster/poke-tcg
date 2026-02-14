@@ -200,8 +200,8 @@ button { cursor:pointer; font-family:inherit; }
 .damage-popup.nve { color:#888; font-size:22px; }
 .damage-popup.dmg-heavy { font-size:40px; animation:dmgPopHeavy 1.4s forwards; }
 .damage-popup.dmg-massive { font-size:54px; animation:dmgPopMassive 2s forwards; text-shadow:0 0 12px rgba(239,68,68,0.6), 0 2px 4px rgba(0,0,0,0.5); }
-.damage-popup.energy-popup { color:#F7D02C; font-size:22px; }
-.damage-popup.mana-popup { color:#38bdf8; font-size:22px; }
+.damage-popup.energy-popup { color:#F7D02C; font-size:28px; text-shadow:0 0 8px rgba(247,208,44,0.5), 0 2px 4px rgba(0,0,0,0.5); }
+.damage-popup.mana-popup { color:#38bdf8; font-size:30px; text-shadow:0 0 8px rgba(56,189,248,0.5), 0 2px 4px rgba(0,0,0,0.5); }
 @keyframes dmgPop { 0% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-60px) scale(1.2); } }
 @keyframes dmgPopHeavy { 0% { opacity:1; transform:translateY(0) scale(1.1); } 50% { opacity:1; } 100% { opacity:0; transform:translateY(-70px) scale(1.4); } }
 @keyframes dmgPopMassive { 0% { opacity:1; transform:translateY(0) scale(1.3); } 60% { opacity:1; } 100% { opacity:0; transform:translateY(-80px) scale(1.6); } }

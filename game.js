@@ -461,7 +461,7 @@ function showEnergyPopup(targetSelector, text) {
     el.style.top = (rect.top + rect.height * 0.3) + 'px';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1000);
+  setTimeout(() => el.remove(), 1500);
 }
 
 // Mana gain popup (cyan)
@@ -474,9 +474,12 @@ function showManaPopup(amount) {
     const rect = manaEl.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2) + 'px';
     el.style.top = (rect.top - 20) + 'px';
+  } else {
+    el.style.left = '50%';
+    el.style.top = '80%';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1000);
+  setTimeout(() => el.remove(), 1500);
 }
 
 // Type-based particle colors
@@ -590,7 +593,10 @@ function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
 
   // Weakness/Resistance multiplier
   let ignoreRes = fx.includes('ignoreRes');
-  let mult = calcWeaknessResistance(attackerTypes, defender);
+  // Lucky Punch: add Normal type for weakness calc
+  let effectiveTypes = attackerTypes;
+  if (luckyProc && !attackerTypes.includes('Normal')) effectiveTypes = [...attackerTypes, 'Normal'];
+  let mult = calcWeaknessResistance(effectiveTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
 
   // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
