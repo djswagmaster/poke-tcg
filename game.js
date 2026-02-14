@@ -733,8 +733,13 @@ function handleKO(pokemon, ownerPlayerNum) {
       G.animating = false; // Allow bench selection clicks
       addLog(`${owner.name} must choose new Active!`, 'info');
     } else {
-      // No bench left — game should end or player is stuck with no active
+      // No bench left — opponent has no Pokémon remaining, they lose
       G.animating = false;
+      G.winner = scorer.name;
+      addLog(`${owner.name} has no Pokémon left!`, 'ko');
+      setTimeout(() => showWin(scorer.name), 500);
+      renderBattle();
+      return;
     }
   } else {
     // Remove from bench

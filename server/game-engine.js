@@ -464,6 +464,12 @@ function handleKO(G, pokemon, ownerPlayerNum) {
     if (owner.bench.length > 0) {
       G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
       addLog(G, owner.name + ' must choose new Active!', 'info');
+    } else {
+      // No bench left — opponent has no Pokémon remaining, they lose
+      G.winner = scorer.name;
+      addLog(G, owner.name + ' has no Pokémon left!', 'ko');
+      G.events.push({ type: 'win', player: scorer.name });
+      return;
     }
   } else {
     owner.bench = owner.bench.filter(function(p2) { return p2 !== pokemon; });
