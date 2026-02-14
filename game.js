@@ -1065,6 +1065,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
     if (selfRes.filtered) { addLog(`${attacker.name}'s Filter blocks the recoil!`, 'effect'); }
     else if (selfRes.damage > 0) {
       dealDamage(attacker, selfRes.damage, G.currentPlayer);
+      checkWeaknessPolicy(attacker, selfRes.mult, G.currentPlayer);
       showDamagePopupAt(selfRes.damage, getPokemonSelector(meNum(), -1), false);
     }
   }

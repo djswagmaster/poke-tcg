@@ -683,7 +683,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
     var selfAtk = Object.assign({}, attack, { baseDmg: sv });
     var selfRes = calcDamage(G, attacker, attacker, selfAtk, attackerData.types, G.currentPlayer);
     if (selfRes.filtered) { addLog(G, attacker.name + '\'s Filter blocks the recoil!', 'effect'); }
-    else if (selfRes.damage > 0) { dealDamage(G, attacker, selfRes.damage, G.currentPlayer); }
+    else if (selfRes.damage > 0) { dealDamage(G, attacker, selfRes.damage, G.currentPlayer); checkWeaknessPolicy(G, attacker, selfRes.mult); }
   }
   if (fx.indexOf('selfEnergyLoss:') >= 0) {
     var elv = parseInt(fx.split('selfEnergyLoss:')[1]);
