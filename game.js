@@ -282,6 +282,33 @@ const G = {
 // Track previous HP percentages for smooth bar transitions
 const prevHpPct = {};
 
+// Anti-softlock watchdog: track when G.animating was last set true
+let lastAnimatingSetAt = 0;
+const ANIMATING_TIMEOUT_MS = 4000; // 4 seconds max for any animation sequence
+
+// Override G.animating with a getter/setter to track timing
+let _animating = false;
+Object.defineProperty(G, 'animating', {
+  get() { return _animating; },
+  set(val) {
+    _animating = val;
+    if (val) lastAnimatingSetAt = Date.now();
+  },
+  enumerable: true, configurable: true
+});
+
+// Watchdog: runs every 2s, force-clears stuck animating state
+setInterval(() => {
+  if (G.phase !== 'battle' || G.winner) return;
+  if (!_animating) return;
+  const elapsed = Date.now() - lastAnimatingSetAt;
+  if (elapsed > ANIMATING_TIMEOUT_MS && !G.targeting && G.pendingRetreats.length === 0) {
+    console.warn('[Softlock watchdog] G.animating stuck for ' + elapsed + 'ms, force-clearing');
+    _animating = false;
+    renderBattle();
+  }
+}, 2000);
+
 function getImg(name) {
   const b64 = CARD_IMAGES[name];
   return b64 ? 'data:image/png;base64,' + b64 : '';
@@ -591,20 +618,7 @@ function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
     if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
   }
 
-  // Weakness/Resistance multiplier
-  let ignoreRes = fx.includes('ignoreRes');
-  // Lucky Punch: add Normal type for weakness calc
-  let effectiveTypes = attackerTypes;
-  if (luckyProc && !attackerTypes.includes('Normal')) effectiveTypes = [...attackerTypes, 'Normal'];
-  let mult = calcWeaknessResistance(effectiveTypes, defender);
-  if (ignoreRes && mult < 1) mult = 1.0;
-
-  // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
-  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
-
-  let totalDmg = Math.floor(baseDmg * mult);
-
-  // Damage reduction on defender
+  // Flat damage reduction on defender (applied BEFORE weakness/resistance)
   let reduction = 0;
   const defAbility = getPokemonData(defender.name).ability;
   if (defAbility && defAbility.key && defAbility.key.startsWith('damageReduce:') && !isPassiveBlocked()) reduction += parseInt(defAbility.key.split(':')[1]);
@@ -621,7 +635,20 @@ function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
   // Shields (temporary)
   if (defender.shields.length > 0) { reduction += defender.shields.reduce((s,v) => s+v, 0); }
 
-  totalDmg = Math.max(0, totalDmg - reduction);
+  baseDmg = Math.max(0, baseDmg - reduction);
+
+  // Weakness/Resistance multiplier (applied AFTER flat bonuses/reductions)
+  let ignoreRes = fx.includes('ignoreRes');
+  // Lucky Punch: add Normal type for weakness calc
+  let effectiveTypes = attackerTypes;
+  if (luckyProc && !attackerTypes.includes('Normal')) effectiveTypes = [...attackerTypes, 'Normal'];
+  let mult = calcWeaknessResistance(effectiveTypes, defender);
+  if (ignoreRes && mult < 1) mult = 1.0;
+
+  // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
+  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+
+  let totalDmg = Math.floor(baseDmg * mult);
 
   // Filter Shield: immune to resisted types
   if (defender.heldItem === 'Filter Shield' && mult < 1) totalDmg = 0;
@@ -691,6 +718,8 @@ function handleKO(pokemon, ownerPlayerNum) {
 
   // Check win
   if (scorer.kos >= 5) {
+    G.winner = scorer.name;
+    G.animating = false;
     setTimeout(() => showWin(scorer.name), 500);
     renderBattle();
     return;
@@ -701,7 +730,11 @@ function handleKO(pokemon, ownerPlayerNum) {
     owner.active = null;
     if (owner.bench.length > 0) {
       G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
+      G.animating = false; // Allow bench selection clicks
       addLog(`${owner.name} must choose new Active!`, 'info');
+    } else {
+      // No bench left — game should end or player is stuck with no active
+      G.animating = false;
     }
   } else {
     // Remove from bench
@@ -714,6 +747,8 @@ function handleKO(pokemon, ownerPlayerNum) {
 // TURN MANAGEMENT
 // ============================================================
 function startTurn() {
+  // Safety: always clear animating at start of turn
+  G.animating = false;
   const p = cp();
   const oldMana = p.mana;
   p.mana = Math.min(10, p.mana + 2);
@@ -2305,10 +2340,11 @@ function renderSetup() {
       </div>`;
     }
   }
-  // For bench phase, allow confirming with 0 selected if no pokemon can be afforded
-  const canConfirmBench = !isActivePhase && setupSelected.length === 0 && !setupItemFor && pokemonHand.every(c => p.mana < getPokemonData(c.name).cost);
+  // For bench phase, always allow confirming with 0 selected (skip bench)
+  const canConfirmBench = !isActivePhase && !setupItemFor;
   const canConfirm = (setupSelected.length > 0 && !setupItemFor) || canConfirmBench;
-  preview.innerHTML = previewHtml + `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="confirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActivePhase ? 'Confirm Active' : (canConfirmBench ? 'Skip Bench (no mana)' : 'Confirm Bench')}</button>`;
+  const benchBtnText = isActivePhase ? 'Confirm Active' : (setupSelected.length === 0 ? 'Skip Bench' : 'Confirm Bench');
+  preview.innerHTML = previewHtml + `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="confirmSetup()" ${canConfirm ? '' : 'disabled'}>${benchBtnText}</button>`;
 
   document.getElementById('setupMana').textContent = `Mana: ${p.mana}`;
 }
@@ -2362,9 +2398,7 @@ function confirmSetup() {
   const playerNum2 = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
   const p2 = G.players[playerNum2];
   const isActivePhase2 = setupStep < 2;
-  const placedNames2 = new Set(setupSelected.map(s => s.name));
-  const pokemonHand2 = p2.hand.filter(c => c.type === 'pokemon' && !placedNames2.has(c.name));
-  const canSkipBench = !isActivePhase2 && setupSelected.length === 0 && !setupItemFor && pokemonHand2.every(c => p2.mana < getPokemonData(c.name).cost);
+  const canSkipBench = !isActivePhase2 && !setupItemFor;
   if (setupItemFor) return;
   if (setupSelected.length === 0 && !canSkipBench) return;
   const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
@@ -2406,6 +2440,14 @@ function confirmSetup() {
 
 // ---------- BATTLE RENDERING ----------
 function renderBattle() {
+  // Anti-softlock: if animating has been stuck too long during render, clear it
+  if (_animating && !G.targeting && G.pendingRetreats.length === 0 && !G.winner) {
+    const elapsed = Date.now() - lastAnimatingSetAt;
+    if (elapsed > ANIMATING_TIMEOUT_MS) {
+      console.warn('[renderBattle] Clearing stuck animating (' + elapsed + 'ms)');
+      _animating = false;
+    }
+  }
   captureHpState();
   const myP = me();
   const theirP = them();
@@ -2462,7 +2504,8 @@ function renderFieldSide(containerId, player, playerNum) {
   for (let i = 0; i < benchSlots; i++) {
     const pk = player.bench[i];
     if (pk) {
-      const isRetreatTarget = G.pendingRetreats.length > 0 && G.pendingRetreats[0].player === playerNum && (!isOnline || playerNum === myPlayerNum);
+      const retreatOwner = G.pendingRetreats.length > 0 ? G.pendingRetreats[0].player : null;
+      const isRetreatTarget = retreatOwner === playerNum && (!isOnline || playerNum === myPlayerNum);
       benchHtml += renderPokemonSlot(pk, 'bench-slot', playerNum, i, isRetreatTarget);
     } else {
       benchHtml += '<div class="bench-empty"></div>';
@@ -2544,8 +2587,9 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
 function renderActionPanel() {
   const panel = document.getElementById('apActions');
   const info = document.getElementById('apPokemonInfo');
-  const myPendingRetreat = G.pendingRetreats.length > 0 && G.pendingRetreats[0].player === myPlayerNum;
-  const oppPendingRetreat = isOnline && G.pendingRetreats.length > 0 && G.pendingRetreats[0].player !== myPlayerNum;
+  const retreatOwner = G.pendingRetreats.length > 0 ? G.pendingRetreats[0].player : null;
+  const myPendingRetreat = retreatOwner !== null && (isOnline ? retreatOwner === myPlayerNum : true);
+  const oppPendingRetreat = isOnline && retreatOwner !== null && retreatOwner !== myPlayerNum;
   if (isOnline && ((!isMyTurn() && !myPendingRetreat) || oppPendingRetreat)) {
     info.innerHTML = '';
     panel.innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
@@ -2562,8 +2606,9 @@ function renderActionPanel() {
 
   // Pending retreat - override everything
   if (G.pendingRetreats.length > 0) {
+    const retreatPlayerName = G.players[retreatOwner].name;
     info.innerHTML = '';
-    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A BENCH POKÉMON TO BECOME ACTIVE</div>`;
+    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">${retreatPlayerName}: SELECT A BENCH POKÉMON TO BECOME ACTIVE</div>`;
     return;
   }
 
@@ -2594,11 +2639,13 @@ function renderActionPanel() {
   const discardBtn = isMine && selPk.heldItem
     ? `<button onclick="discardHeldItem('${isActive ? 'active' : 'bench'}',${isActive ? null : sel.benchIdx})" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button>`
     : '';
+  const zoomBtn = `<button onclick="zoomCard('${selPk.name.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(129,140,248,0.3);color:#a5b4fc;border:1px solid rgba(129,140,248,0.3);border-radius:4px;padding:2px 8px;cursor:pointer;margin-left:6px">🔍 View</button>`;
+  const itemZoomBtn = selPk.heldItem ? `<button onclick="zoomCard('${selPk.heldItem.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(168,85,247,0.2);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">🔍</button>` : '';
   info.innerHTML = `
-    <div class="ap-pokemon-name">${selPk.name}${!isMine ? ' <span style="color:#ef4444;font-size:10px">(Enemy)</span>' : ''}</div>
+    <div class="ap-pokemon-name">${selPk.name}${!isMine ? ' <span style="color:#ef4444;font-size:10px">(Enemy)</span>' : ''} ${zoomBtn}</div>
     <div class="ap-pokemon-types">${selData.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
     <div class="ap-pokemon-hp">HP: ${selPk.hp}/${selPk.maxHp} | Energy: ${selPk.energy}/5</div>
-    ${selPk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${selPk.heldItem} ${discardBtn}</div>` : ''}
+    ${selPk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${selPk.heldItem} ${itemZoomBtn} ${discardBtn}</div>` : ''}
     ${selPk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${selPk.status.join(', ')}</div>` : ''}
     ${selData.ability ? `<div style="font-size:10px;color:#c4b5fd">✦ ${selData.ability.name}: ${selData.ability.desc} <span style="opacity:0.6">[${selData.ability.type}]</span></div>` : ''}
     <div style="font-size:10px;color:#888;margin-top:2px">${selData.attacks.map(a => `${a.name} (${a.energy}⚡${a.baseDmg ? ', ' + a.baseDmg + 'dmg' : ''})`).join(' · ')}</div>

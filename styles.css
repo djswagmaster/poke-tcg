@@ -309,12 +309,13 @@ button { cursor:pointer; font-family:inherit; }
   .battle-screen { height:100vh; min-height:100vh; }
 
   /* Action panel stacks vertically */
-  .action-panel { height:auto; max-height:50vh; flex-direction:column; overflow-y:auto; }
-  .ap-pokemon-info { width:100%; border-right:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:8px 12px; flex-direction:row; flex-wrap:wrap; gap:4px 12px; }
-  .ap-actions { width:100%; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.06); max-height:180px; overflow-y:auto; }
-  .ap-btn { min-width:110px; padding:8px 12px; }
-  .ap-hand { width:100%; border-left:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:8px 12px; max-height:140px; }
-  .ap-log { width:100%; border-left:none; padding:8px 12px; max-height:120px; }
+  .action-panel { height:auto; min-height:180px; max-height:55vh; flex-direction:column; overflow-y:auto; }
+  .ap-pokemon-info { width:100%; border-right:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:10px 14px; flex-direction:row; flex-wrap:wrap; gap:4px 12px; }
+  .ap-actions { width:100%; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); max-height:220px; overflow-y:auto; }
+  .ap-btn { min-width:120px; padding:10px 14px; font-size:13px; }
+  .ap-hand { width:100%; border-left:none; border-bottom:1px solid rgba(255,255,255,0.06); padding:10px 14px; max-height:160px; }
+  .ap-log { width:100%; border-left:none; padding:8px 12px; max-height:100px; }
+  .ap-section-label { font-size:12px; padding:6px 0; }
 
   /* Smaller Pokemon images */
   .field-pokemon.active-slot .fp-img { width:100px; }
@@ -360,7 +361,8 @@ button { cursor:pointer; font-family:inherit; }
 }
 
 @media (max-width: 480px) {
-  .ap-btn { min-width:90px; font-size:11px; padding:6px 8px; }
+  .ap-btn { min-width:100px; font-size:12px; padding:8px 10px; }
+  .ap-actions { padding:8px 10px; }
   .field-pokemon.active-slot .fp-img { width:80px; }
   .field-pokemon.bench-slot .fp-img { width:50px; }
   .bench-empty { width:50px; height:70px; }

@@ -373,17 +373,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
     if (attacker.heldItem === 'Lucky Punch' && Math.random() < 0.5) { baseDmg += 20; luckyProc = true; }
   }
 
-  var ignoreRes = fx.indexOf('ignoreRes') >= 0;
-  // Lucky Punch: add Normal type for weakness calc
-  var effectiveTypes = attackerTypes;
-  if (luckyProc && attackerTypes.indexOf('Normal') < 0) effectiveTypes = attackerTypes.concat(['Normal']);
-  var mult = calcWeaknessResistance(G, effectiveTypes, defender);
-  if (ignoreRes && mult < 1) mult = 1.0;
-  // Expert Belt: 2x instead of 1.5x - applies to ALL opponent's Pokemon
-  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
-
-  var totalDmg = Math.floor(baseDmg * mult);
-
+  // Flat damage reduction on defender (applied BEFORE weakness/resistance)
   var reduction = 0;
   var defAbility = getPokemonData(defender.name).ability;
   if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G))
@@ -400,7 +390,18 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   if (defPlayerObj.active && defPlayerObj.active.heldItem === 'Wide Shield') reduction += 10;
   if (defender.shields.length > 0) { reduction += defender.shields.reduce(function(s,v){return s+v;}, 0); }
 
-  totalDmg = Math.max(0, totalDmg - reduction);
+  baseDmg = Math.max(0, baseDmg - reduction);
+
+  // Weakness/Resistance multiplier (applied AFTER flat bonuses/reductions)
+  var ignoreRes = fx.indexOf('ignoreRes') >= 0;
+  var effectiveTypes = attackerTypes;
+  if (luckyProc && attackerTypes.indexOf('Normal') < 0) effectiveTypes = attackerTypes.concat(['Normal']);
+  var mult = calcWeaknessResistance(G, effectiveTypes, defender);
+  if (ignoreRes && mult < 1) mult = 1.0;
+  if (isOpponent && attacker.heldItem === 'Expert Belt' && mult === 1.5) mult = 2.0;
+
+  var totalDmg = Math.floor(baseDmg * mult);
+
   if (defender.heldItem === 'Filter Shield' && mult < 1) totalDmg = 0;
   if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G))
     return { damage: 0, mult: mult, filtered: true };
