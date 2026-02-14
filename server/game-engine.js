@@ -233,6 +233,7 @@ const ITEM_DB = [
   {name:"Rocky Helmet",desc:"Attacked: 30 dmg back",key:"rockyHelmet"},
   {name:"Shell Bell",desc:"Heal 30 when attacking",key:"shellBell"},
   {name:"Sitrus Berry",desc:"At 100+ dmg: heal 60",key:"sitrusBerry",oneTime:true},
+  {name:"Weakness Policy",desc:"Weak hit: +2 energy, discard",key:"weaknessPolicy",oneTime:true},
   {name:"White Herb",desc:"Prevent 2 energy loss",key:"whiteHerb",oneTime:true},
   {name:"Wide Shield",desc:"Active: team -10 dmg",key:"wideShield"},
 ];
@@ -412,6 +413,17 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 // ============================================================
 // DEAL DAMAGE & KO
 // ============================================================
+function checkWeaknessPolicy(G, pokemon, mult) {
+  if (pokemon.heldItem === 'Weakness Policy' && mult >= 1.5 && pokemon.hp > 0) {
+    var gained = Math.min(2, 5 - pokemon.energy);
+    if (gained > 0) pokemon.energy += gained;
+    pokemon.heldItemUsed = true;
+    pokemon.heldItem = null;
+    addLog(G, 'Weakness Policy: ' + pokemon.name + ' gains +' + gained + ' energy! (Discarded)', 'effect');
+    G.events.push({ type: 'item_proc', item: 'Weakness Policy', pokemonName: pokemon.name, energyGained: gained });
+  }
+}
+
 function dealDamage(G, pokemon, amount, playerNum) {
   if (amount <= 0) return false;
   pokemon.damage += amount;
@@ -713,6 +725,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, ownerNum);
+        checkWeaknessPolicy(G, bpk, res.mult);
         if (bko) handleKO(G, bpk, ownerNum);
       }
     });
@@ -726,6 +739,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var bko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
+        checkWeaknessPolicy(G, bpk, res.mult);
         if (bko) handleKO(G, bpk, oppPlayer(G.currentPlayer));
       }
     });
@@ -756,6 +770,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       if (sbRes.filtered) { addLog(G, sbTarget.name + '\'s Filter blocks the damage!', 'effect'); }
       else if (sbRes.damage > 0) {
         dealDamage(G, sbTarget, sbRes.damage, G.currentPlayer);
+        checkWeaknessPolicy(G, sbTarget, sbRes.mult);
         addLog(G, 'Collateral: ' + sbRes.damage + ' to ' + sbTarget.name, 'damage');
       }
     }
@@ -792,6 +807,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       addLog(G, defender.name + '\'s Filter blocks the damage!', 'effect');
     } else if (madResult.damage > 0) {
       var madKo = dealDamage(G, defender, madResult.damage, oppPlayer(G.currentPlayer));
+      checkWeaknessPolicy(G, defender, madResult.mult);
       addLog(G, 'Mad Party: ' + totalPokemon + ' Pokémon = ' + madResult.damage + ' damage!', 'damage');
       G.events.push({ type: 'damage', targetPlayer: oppPlayer(G.currentPlayer), targetIdx: -1, amount: madResult.damage, mult: madResult.mult });
       if (madKo) handleKO(G, defender, oppPlayer(G.currentPlayer));
@@ -806,6 +822,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
     } else if (fangResult.damage > 0) {
       var fko = dealDamage(G, defender, fangResult.damage, oppPlayer(G.currentPlayer));
+      checkWeaknessPolicy(G, defender, fangResult.mult);
       addLog(G, 'Finishing Fang bonus: +' + fangResult.damage + ' (target low HP)!', 'damage');
       if (fko) handleKO(G, defender, oppPlayer(G.currentPlayer));
     }
@@ -855,6 +872,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
         if (res.filtered) { addLog(G, bpk.name + '\'s Filter blocks the damage!', 'effect'); return; }
         if (res.damage > 0) {
           var cbko = dealDamage(G, bpk, res.damage, oppPlayer(G.currentPlayer));
+          checkWeaknessPolicy(G, bpk, res.mult);
           if (cbko) handleKO(G, bpk, oppPlayer(G.currentPlayer));
         }
       });
@@ -875,6 +893,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
         addLog(G, defender.name + '\'s Filter blocks the bonus damage!', 'effect');
       } else if (boostResult.damage > 0) {
         var boko = dealDamage(G, defender, boostResult.damage, oppPlayer(G.currentPlayer));
+        checkWeaknessPolicy(G, defender, boostResult.mult);
         addLog(G, 'Boosted: +' + boostResult.damage + ' damage (lost ' + energyCost + ' energy)!', 'damage');
         if (boko) handleKO(G, defender, oppPlayer(G.currentPlayer));
       }
@@ -905,6 +924,7 @@ function processAttackFx(G, fx, attacker, defender, attack, attackerTypes, actio
       if (res.filtered) { addLog(G, mtTarget.name + '\'s Filter blocks the damage!', 'effect'); return; }
       if (res.damage > 0) {
         var mtko = dealDamage(G, mtTarget, res.damage, oppPlayer(G.currentPlayer));
+        checkWeaknessPolicy(G, mtTarget, res.mult);
         addLog(G, res.damage + ' to ' + mtTarget.name, 'damage');
         if (mtko) handleKO(G, mtTarget, oppPlayer(G.currentPlayer));
       }
@@ -994,6 +1014,9 @@ function dealAttackDamageToDefender(G, attacker, defender, attack, attackerTypes
       if (!attacker.status.includes('confusion')) attacker.status.push('confusion');
       addLog(G, 'Loud Bell: 10 damage + Confusion!', 'effect');
     }
+
+    // Weakness Policy
+    checkWeaknessPolicy(G, defender, result.mult);
 
     // Shell Bell
     if (attacker.heldItem === 'Shell Bell') {
@@ -1201,6 +1224,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (snipeResult.damage > 0) {
       var sko = dealDamage(G, targetPk, snipeResult.damage, targetPlayer);
+      checkWeaknessPolicy(G, targetPk, snipeResult.mult);
       addLog(G, ctx.attack.name + ' hits ' + targetPk.name + ' for ' + snipeResult.damage + '!', 'damage');
       if (snipeResult.mult > 1) addLog(G, 'Super Effective!', 'effect');
       if (snipeResult.mult < 1) addLog(G, 'Not very effective...', 'info');
@@ -1219,6 +1243,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
       addLog(G, targetPk.name + '\'s Filter blocks the damage!', 'effect');
     } else if (result.damage > 0) {
       var tko = dealDamage(G, targetPk, result.damage, targetPlayer);
+      checkWeaknessPolicy(G, targetPk, result.mult);
       addLog(G, result.damage + ' snipe to ' + targetPk.name, 'damage');
       if (result.mult > 1) addLog(G, 'Super Effective!', 'effect');
       if (result.mult < 1) addLog(G, 'Not very effective...', 'info');

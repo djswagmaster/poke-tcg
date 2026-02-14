@@ -258,6 +258,7 @@ const ITEM_DB = [
   {name:"Rocky Helmet",desc:"Attacked: 30 dmg back",key:"rockyHelmet"},
   {name:"Shell Bell",desc:"Heal 30 when attacking",key:"shellBell"},
   {name:"Sitrus Berry",desc:"At 100+ dmg: heal 60",key:"sitrusBerry",oneTime:true},
+  {name:"Weakness Policy",desc:"Weak hit: +2 energy, discard",key:"weaknessPolicy",oneTime:true},
   {name:"White Herb",desc:"Prevent 2 energy loss",key:"whiteHerb",oneTime:true},
   {name:"Wide Shield",desc:"Active: team -10 dmg",key:"wideShield"},
 ];
@@ -657,6 +658,24 @@ function calcDamage(attacker, defender, attack, attackerTypes, defenderOwner) {
   if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked()) return { damage: 0, mult, filtered: true };
 
   return { damage: totalDmg, mult, luckyProc, reduction };
+}
+
+// ============================================================
+// WEAKNESS POLICY CHECK (after attack damage)
+// ============================================================
+function checkWeaknessPolicy(pokemon, mult, ownerPlayerNum) {
+  if (pokemon.heldItem === 'Weakness Policy' && mult >= 1.5 && pokemon.hp > 0) {
+    const gained = Math.min(2, 5 - pokemon.energy);
+    if (gained > 0) pokemon.energy += gained;
+    pokemon.heldItemUsed = true;
+    pokemon.heldItem = null;
+    const sel = findPokemonSelector(pokemon);
+    if (sel) {
+      showEnergyPopup(gained, sel);
+      animateEl(sel, 'item-proc', 600);
+    }
+    addLog(`Weakness Policy: ${pokemon.name} gains +${gained} energy! (Discarded)`, 'effect');
+  }
 }
 
 // ============================================================
@@ -1098,6 +1117,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         showDamagePopupAt(res.damage, sel, false);
         animateEl(sel, 'hit-shake', 500);
         const ko = dealDamage(pk, res.damage, ownerNum);
+        checkWeaknessPolicy(pk, res.mult, ownerNum);
         if (ko) handleKO(pk, ownerNum);
       }
     });
@@ -1114,6 +1134,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         showDamagePopupAt(res.damage, sel, false);
         animateEl(sel, 'hit-shake', 500);
         const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
+        checkWeaknessPolicy(pk, res.mult, opp(G.currentPlayer));
         if (ko) handleKO(pk, opp(G.currentPlayer));
       }
     });
@@ -1136,6 +1157,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
           const attackerColor = TYPE_PARTICLE_COLORS[attackerData.types[0]] || '#ef4444';
           spawnParticlesAtEl(targetSel, attackerColor, result.damage >= 50 ? 14 : 8, {spread: result.damage >= 50 ? 55 : 40});
           const ko = dealDamage(tPk, result.damage, tOwner);
+          checkWeaknessPolicy(tPk, result.mult, tOwner);
           addLog(result.damage+" snipe to "+tPk.name, "damage");
           if (result.mult > 1) addLog("Super Effective!", "effect");
           if (result.mult < 1) addLog("Not very effective...", "info");
@@ -1162,6 +1184,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         showDamagePopupAt(sbRes.damage, sel, false);
         animateEl(sel, 'hit-shake', 500);
         dealDamage(target, sbRes.damage, G.currentPlayer);
+        checkWeaknessPolicy(target, sbRes.mult, G.currentPlayer);
         addLog(`Collateral: ${sbRes.damage} to ${target.name}`, 'damage');
       }
     }
@@ -1203,6 +1226,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
       addLog(`${defender.name}'s Filter blocks the damage!`, 'effect');
     } else if (madResult.damage > 0) {
       const ko = dealDamage(defender, madResult.damage, opp(G.currentPlayer));
+      checkWeaknessPolicy(defender, madResult.mult, opp(G.currentPlayer));
       addLog(`Mad Party: ${totalPokemon} Pokémon = ${madResult.damage} damage!`, 'damage');
       showDamagePopup(madResult.damage, madResult.mult);
       if (ko) handleKO(defender, opp(G.currentPlayer));
@@ -1218,6 +1242,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (fangResult.damage > 0) {
         const ko = dealDamage(defender, fangResult.damage, opp(G.currentPlayer));
+        checkWeaknessPolicy(defender, fangResult.mult, opp(G.currentPlayer));
         addLog(`Finishing Fang bonus: +${fangResult.damage} (target low HP)!`, 'damage');
         if (ko) handleKO(defender, opp(G.currentPlayer));
       }
@@ -1258,6 +1283,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
           animateEl(targetSel, getShakeClass(result.damage), getShakeDuration(result.damage));
           spawnParticlesAtEl(targetSel, '#A6B91A', 10, {spread:45});
           const ko = dealDamage(tPk, result.damage, tOwner);
+          checkWeaknessPolicy(tPk, result.mult, tOwner);
           addLog(`Swarm Snipe: ${myCount} Pokémon = ${result.damage} to ${tPk.name}!`, 'damage');
           if (result.mult > 1) addLog("Super Effective!", "effect");
           if (result.mult < 1) addLog("Not very effective...", "info");
@@ -1288,6 +1314,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
           showDamagePopupAt(res.damage, sel, false);
           animateEl(sel, 'hit-shake', 500);
           const ko = dealDamage(pk, res.damage, opp(G.currentPlayer));
+          checkWeaknessPolicy(pk, res.mult, opp(G.currentPlayer));
           if (ko) handleKO(pk, opp(G.currentPlayer));
         }
       });
@@ -1308,6 +1335,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         addLog(`${defender.name}'s Filter blocks the bonus damage!`, 'effect');
       } else if (boostResult.damage > 0) {
         const ko = dealDamage(defender, boostResult.damage, opp(G.currentPlayer));
+        checkWeaknessPolicy(defender, boostResult.mult, opp(G.currentPlayer));
         addLog(`Boosted: +${boostResult.damage} damage (lost ${energyCost} energy)!`, 'damage');
         if (ko) handleKO(defender, opp(G.currentPlayer));
       }
@@ -1344,6 +1372,7 @@ async function processAttackFx(fx, attacker, defender, attack, p) {
         showDamagePopupAt(res.damage, sel, false);
         animateEl(sel, getShakeClass(res.damage), getShakeDuration(res.damage));
         const ko = dealDamage(target, res.damage, opp(G.currentPlayer));
+        checkWeaknessPolicy(target, res.mult, opp(G.currentPlayer));
         addLog(`${res.damage} to ${target.name}`, 'damage');
         if (ko) handleKO(target, opp(G.currentPlayer));
       }
@@ -1496,6 +1525,10 @@ async function performAttackDamage(attacker, defender, attack, attackerTypes, fx
       await delay(300);
     }
 
+    // Weakness Policy
+    checkWeaknessPolicy(defender, result.mult, opp(G.currentPlayer));
+    renderBattle();
+
     await delay(300);
     if (ko) {
       animateEl("#oppField .active-slot", "ko-fall", 600);
@@ -1522,6 +1555,7 @@ function createSnipeCallback(attacker, attack, attackerTypes, fx, validTargets, 
       const attackerColor = TYPE_PARTICLE_COLORS[attackerTypes[0]] || '#fff';
       spawnParticlesAtEl(targetSel, attackerColor, 12, {spread:50});
       const ko = dealDamage(tPk, snipeResult.damage, tOwner);
+      checkWeaknessPolicy(tPk, snipeResult.mult, tOwner);
       addLog(attack.name+" hits "+tPk.name+" for "+snipeResult.damage+"!", "damage");
       if (snipeResult.mult > 1) addLog("Super Effective!", "effect");
       if (snipeResult.mult < 1) addLog("Not very effective...", "info");
