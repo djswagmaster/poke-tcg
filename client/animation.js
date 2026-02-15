@@ -340,6 +340,19 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         break;
 
+      case 'extra_turn_start':
+        ctx.showTurnOverlay((evt.playerName || ('Player ' + evt.player)) + ' gets an extra turn!');
+        await ctx.delay(1000);
+        if (typeof window !== 'undefined' && window._replayPov != null) {
+          window._replayPov = evt.player;
+        }
+        if (typeof window !== 'undefined' && window.G) {
+          window.G.currentPlayer = evt.player;
+          if (evt.turn) window.G.turn = evt.turn;
+        }
+        ctx.renderBattle();
+        break;
+
       case 'switch_active':
         var switchSide = '#youField';
         if (evt.player !== window.G.currentPlayer) switchSide = '#oppField';

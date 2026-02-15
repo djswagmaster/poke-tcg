@@ -35,6 +35,8 @@ button { cursor:pointer; font-family:inherit; }
 .db-sidebar-item img { width:32px; border-radius:3px; }
 .db-sidebar-item span { font-size:11px; font-weight:600; color:#ccc; }
 .db-confirm { padding:14px; border-top:1px solid rgba(255,255,255,0.06); }
+.db-random-btn { width:100%; padding:10px; margin-bottom:8px; border:1px solid rgba(255,255,255,0.18); border-radius:10px; font-weight:800; font-size:13px; color:#e2e8f0; background:rgba(255,255,255,0.06); transition:all 0.2s; }
+.db-random-btn:hover { background:rgba(255,255,255,0.12); border-color:rgba(251,191,36,0.6); color:#fde68a; }
 .db-confirm-btn { width:100%; padding:12px; border:none; border-radius:10px; font-weight:800; font-size:14px; transition:all 0.2s; }
 .db-confirm-btn.ready { background:linear-gradient(135deg,#4ade80,#22c55e); color:#000; }
 .db-confirm-btn.disabled { background:rgba(255,255,255,0.05); color:#555; pointer-events:none; }

@@ -188,6 +188,13 @@ register('selfEnergyLoss', function(G, ctx, params) {
   return null;
 });
 
+// --- Extra turn ---
+register('extraTurn', function(G, ctx, params) {
+  G.extraTurnFor = ctx.currentPlayer;
+  ctx.events.push({ type: 'extra_turn', player: ctx.currentPlayer, pokemon: ctx.attacker.name });
+  return null;
+});
+
 // --- Self shield ---
 register('selfShield', function(G, ctx, params) {
   var v = params[0] || 0;

@@ -70,21 +70,34 @@ function makePokemon(name, heldItem) {
 // GAME STATE FACTORY
 // ============================================================
 function createGame() {
+  _deps();
   return {
     phase: 'deckBuild',
     currentPlayer: 1,
     turn: 0,
     players: {
-      1: { name: 'Player 1', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false },
-      2: { name: 'Player 2', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false },
+      1: { name: 'Player 1', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
+      2: { name: 'Player 2', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
     },
     log: [],
     events: [],
     targeting: null,
     pendingRetreats: [],
+    extraTurnFor: null,
     selectedCard: null,
     winner: null,
   };
+}
+
+function runOnPlayAbility(G, playerNum, pk) {
+  var data = PokemonDB.getPokemonData(pk.name);
+  if (!data || !data.ability || data.ability.type !== 'onPlay') return;
+  if (data.ability.key === 'dimensionExpansion') {
+    var p = G.players[playerNum];
+    p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 1;
+    addLog(G, pk.name + ' expands your bench capacity by 1!', 'effect');
+    G.events.push({ type: 'ability_effect', ability: 'dimensionExpansion', pokemon: pk.name, player: playerNum, maxBench: p.maxBench });
+  }
 }
 
 // ============================================================
@@ -243,6 +256,14 @@ function endTurn(G) {
 }
 
 function switchTurn(G) {
+  if (G.extraTurnFor && G.extraTurnFor === G.currentPlayer) {
+    var p = G.players[G.currentPlayer];
+    G.extraTurnFor = null;
+    G.turn++;
+    G.events.push({ type: 'extra_turn_start', player: G.currentPlayer, turn: G.turn, playerName: p.name });
+    startTurn(G);
+    return;
+  }
   G.currentPlayer = opp(G.currentPlayer);
   G.turn++;
   G.events.push({ type: 'switch_turn', player: G.currentPlayer, turn: G.turn, playerName: G.players[G.currentPlayer].name });
@@ -393,7 +414,8 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   G.attackSeq = (G.attackSeq || 0) + 1;
 
   // Use ATTACKER's types for damage, not source's
-  executeAttack(G, attacker, attack, attData.types, fx, p, false, G.attackSeq);
+  var useOptBoost = (actionOpts && actionOpts.useOptBoost) || false;
+  executeAttack(G, attacker, attack, attData.types, fx, p, useOptBoost, G.attackSeq);
   return true;
 }
 
@@ -627,7 +649,7 @@ function doPlayPokemon(G, handIdx, itemHandIdx) {
   var card = p.hand[handIdx];
   if (!card || card.type !== 'pokemon') return false;
   var data = PokemonDB.getPokemonData(card.name);
-  if (p.mana < data.cost || p.bench.length >= Constants.MAX_BENCH) return false;
+  if (p.mana < data.cost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
 
   var heldItem = card.heldItem || null;
   // Attach item from hand
@@ -652,6 +674,7 @@ function doPlayPokemon(G, handIdx, itemHandIdx) {
   p.mana -= data.cost;
   var pk = makePokemon(card.name, heldItem);
   p.bench.push(pk);
+  runOnPlayAbility(G, G.currentPlayer, pk);
   addLog(G, 'Played ' + pk.name + (heldItem ? ' with ' + heldItem : '') + ' to bench', 'info');
   G.events.push({ type: 'play_pokemon', pokemon: pk.name, heldItem: heldItem, player: G.currentPlayer });
 
@@ -1068,6 +1091,7 @@ function processSetupChoice(G, playerNum, choices) {
     p.mana -= cost;
 
     p.active = makePokemon(card.name, heldItem);
+    runOnPlayAbility(G, playerNum, p.active);
 
     // Remove from hand
     var indicesToRemove = [choices.activeIdx];
@@ -1094,6 +1118,8 @@ function processSetupChoice(G, playerNum, choices) {
     // This prevents setup-picked bench Pokemon/items from lingering in hand.
     var ordered = selections.slice().sort(function(a, b) { return b.handIdx - a.handIdx; });
     ordered.forEach(function(sel) {
+      var maxBench = p.maxBench || Constants.MAX_BENCH;
+      if (p.bench.length >= maxBench) return;
       var handIdx = sel.handIdx;
       if (handIdx === null || handIdx === undefined) return;
       if (handIdx < 0 || handIdx >= p.hand.length) return;
@@ -1115,7 +1141,9 @@ function processSetupChoice(G, playerNum, choices) {
       }
 
       p.mana -= bCost;
-      p.bench.push(makePokemon(bcard.name, bHeldItem));
+      var setupPk = makePokemon(bcard.name, bHeldItem);
+      p.bench.push(setupPk);
+      runOnPlayAbility(G, playerNum, setupPk);
 
       // Remove chosen cards directly by index (higher first to avoid shifts).
       if (itemIdx !== null && itemIdx !== undefined && itemIdx >= 0 && itemIdx < p.hand.length && itemIdx !== handIdx) {
@@ -1219,6 +1247,7 @@ function filterStateForPlayer(G, playerNum) {
   }
 
   delete state.events;
+  if (state.extraTurnFor == null) state.extraTurnFor = null;
   return state;
 }
 

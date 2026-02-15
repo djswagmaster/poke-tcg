@@ -115,6 +115,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
   var baseDmg = attack.baseDmg;
   var fx = attack.fx || '';
+  var ignoreReduction = fx.indexOf('ignoreReduction') !== -1;
 
   // --- Attack-specific scaling (from fx string) ---
   if (fx.indexOf('scaleDef:') !== -1) { var v = parseInt(fx.split('scaleDef:')[1]); baseDmg += v * defender.energy; }
@@ -156,48 +157,50 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   var reduction = 0;
   var defAbility = PokemonDB.getPokemonData(defender.name).ability;
 
-  // Ability-based reduction (damageReduce:N)
-  if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G)) {
-    reduction += parseInt(defAbility.key.split(':')[1]);
-  }
-
-  // Item-based reduction (hooks: onTakeDamage)
-  if (defender.heldItem) {
-    var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, { holder: defender });
-    if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
-  }
-
-  // Aurora Veil (team-wide passive)
-  var allDefPokemon = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
-  if (!isPassiveBlocked(G)) {
-    for (var i = 0; i < allDefPokemon.length; i++) {
-      var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
-      if (pData.ability && pData.ability.key === 'auroraVeil') { reduction += 10; break; }
+  if (!ignoreReduction) {
+    // Ability-based reduction (damageReduce:N)
+    if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G)) {
+      reduction += parseInt(defAbility.key.split(':')[1]);
     }
-  }
 
-  // Wide Shield (team-wide item: onTeamTakeDamage)
-  if (defPlayer.active && defPlayer.active.heldItem === 'Wide Shield') {
-    var wsResult = ItemDB.runItemHook('onTeamTakeDamage', 'Wide Shield', {
-      holder: defPlayer.active, holderIsActive: true
-    });
-    if (wsResult && wsResult.reduction) reduction += wsResult.reduction;
-  }
+    // Item-based reduction (hooks: onTakeDamage)
+    if (defender.heldItem) {
+      var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, { holder: defender });
+      if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
+    }
 
-  // Shields (temporary from selfShield fx)
-  if (defender.shields && defender.shields.length > 0) {
-    for (var i = 0; i < defender.shields.length; i++) reduction += defender.shields[i];
-  }
+    // Aurora Veil (team-wide passive)
+    var allDefPokemon = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
+    if (!isPassiveBlocked(G)) {
+      for (var i = 0; i < allDefPokemon.length; i++) {
+        var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
+        if (pData.ability && pData.ability.key === 'auroraVeil') { reduction += 10; break; }
+      }
+    }
 
-  // Vulnerability (from selfVuln fx)
-  if (defender.vulnerability && defender.vulnerability > 0) {
-    reduction -= defender.vulnerability;
+    // Wide Shield (team-wide item: onTeamTakeDamage)
+    if (defPlayer.active && defPlayer.active.heldItem === 'Wide Shield') {
+      var wsResult = ItemDB.runItemHook('onTeamTakeDamage', 'Wide Shield', {
+        holder: defPlayer.active, holderIsActive: true
+      });
+      if (wsResult && wsResult.reduction) reduction += wsResult.reduction;
+    }
+
+    // Shields (temporary from selfShield fx)
+    if (defender.shields && defender.shields.length > 0) {
+      for (var i = 0; i < defender.shields.length; i++) reduction += defender.shields[i];
+    }
+
+    // Vulnerability (from selfVuln fx)
+    if (defender.vulnerability && defender.vulnerability > 0) {
+      reduction -= defender.vulnerability;
+    }
   }
 
   baseDmg = Math.max(0, baseDmg - reduction);
 
   // --- Weakness/Resistance multiplier (after flat mods) ---
-  var ignoreRes = fx.indexOf('ignoreRes') !== -1;
+  var ignoreRes = fx.indexOf('ignoreRes') !== -1 || ignoreReduction;
   var mult = calcWeaknessResistance(attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
 
@@ -221,7 +224,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   }
 
   // Mega Aggron Filter: block any final damage <= 50
-  if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G)) {
+  if (!ignoreReduction && defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G)) {
     return { damage: 0, mult: mult, filtered: true, luckyProc: luckyProc, reduction: reduction };
   }
 
