@@ -46,7 +46,7 @@ window.POKEMON_DATA = [
   { name: "Mawile",             types: ["Steel", "Fairy"],        cost: 3, hp: 180, weakness: ["Fighting"],              resistance: ["Dragon"] },
   { name: "Medicham",           types: ["Fighting", "Psychic"],   cost: 3, hp: 190, weakness: ["Flying", "Dark"],        resistance: ["Rock", "Psychic"] },
   { name: "Mega Absol",         types: ["Dark"],                  cost: 5, hp: 190, weakness: ["Fairy"],                 resistance: ["Dark"] },
-  { name: "Mega Absol Z",       types: ["Dark", "Psychic"],       cost: 5, hp: 190, weakness: ["Fairy", "Ghost"],                 resistance: ["Dark", "Normal"] },
+  { name: "Mega Absol Z",       types: ["Dark", "Ghost"],       cost: 5, hp: 190, weakness: ["Fairy", "Ghost"],                 resistance: ["Dark", "Normal"] },
   { name: "Mega Aggron",        types: ["Steel"],                 cost: 5, hp: 310, weakness: ["Fighting"],              resistance: ["Poison"] },
   { name: "Mega Audino",        types: ["Normal", "Fairy"],       cost: 4, hp: 260, weakness: ["Poison"],                resistance: ["Ghost", "Dragon"] },
   { name: "Mega Blaziken",      types: ["Fire", "Fighting"],      cost: 5, hp: 210, weakness: ["Water", "Flying"],       resistance: ["Fairy", "Rock"] },
