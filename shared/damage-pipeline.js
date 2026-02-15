@@ -368,7 +368,9 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
   _deps();
   var events = [];
 
-  if (!defender.heldItem || defender.hp <= 0) return events;
+  // Reactive on-damaged items should still trigger even if the holder was
+  // KO'd by the hit (e.g. Rocky Helmet retaliation on lethal contact).
+  if (!defender.heldItem) return events;
 
   // Weakness Policy (special: energy gain on super-effective)
   var wpResult = ItemDB.runItemHook('onDamagedByAttack', defender.heldItem, {

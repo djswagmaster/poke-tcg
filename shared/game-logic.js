@@ -1090,39 +1090,43 @@ function processSetupChoice(G, playerNum, choices) {
     // choices = { benchSelections: [{handIdx, itemIdx}] }
     var selections = choices.benchSelections || [];
 
-    // Process each selection (from highest index to lowest to preserve indices)
-    var toRemove = [];
-    selections.forEach(function(sel) {
-      var bcard = p.hand[sel.handIdx];
+    // Resolve by descending card index so removals don't invalidate later picks.
+    // This prevents setup-picked bench Pokemon/items from lingering in hand.
+    var ordered = selections.slice().sort(function(a, b) { return b.handIdx - a.handIdx; });
+    ordered.forEach(function(sel) {
+      var handIdx = sel.handIdx;
+      if (handIdx === null || handIdx === undefined) return;
+      if (handIdx < 0 || handIdx >= p.hand.length) return;
+
+      var bcard = p.hand[handIdx];
       if (!bcard || bcard.type !== 'pokemon') return;
 
       var bPokData = PokemonDB.getPokemonData(bcard.name);
       var bCost = bPokData ? bPokData.cost : 0;
       if (p.mana < bCost) return;
-      p.mana -= bCost;
 
+      var itemIdx = sel.itemIdx;
       var bHeldItem = null;
-      if (sel.itemIdx !== null && sel.itemIdx !== undefined) {
-        var biCard = p.hand[sel.itemIdx];
+      if (itemIdx !== null && itemIdx !== undefined && itemIdx >= 0 && itemIdx < p.hand.length && itemIdx !== handIdx) {
+        var biCard = p.hand[itemIdx];
         if (biCard && biCard.type === 'items') {
           bHeldItem = biCard.name;
-          toRemove.push(sel.itemIdx);
         }
       }
 
+      p.mana -= bCost;
       p.bench.push(makePokemon(bcard.name, bHeldItem));
-      toRemove.push(sel.handIdx);
 
-      // Remove item from hand tracking
-      if (bHeldItem) {
-        p.hand = p.hand.filter(function(c) { return c.name !== bHeldItem || c.type !== 'items'; });
+      // Remove chosen cards directly by index (higher first to avoid shifts).
+      if (itemIdx !== null && itemIdx !== undefined && itemIdx >= 0 && itemIdx < p.hand.length && itemIdx !== handIdx) {
+        var hi = Math.max(handIdx, itemIdx);
+        var lo = Math.min(handIdx, itemIdx);
+        p.hand.splice(hi, 1);
+        p.hand.splice(lo, 1);
+      } else {
+        p.hand.splice(handIdx, 1);
       }
     });
-
-    // Remove used cards (deduplicate and sort descending)
-    toRemove = toRemove.filter(function(v, i, a) { return a.indexOf(v) === i; });
-    toRemove.sort(function(a,b) { return b - a; });
-    toRemove.forEach(function(idx) { if (idx < p.hand.length) p.hand.splice(idx, 1); });
 
     // Advance
     if (playerNum === 1) {
