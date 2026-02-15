@@ -295,6 +295,7 @@ const animCtx = {
   focusOnActives,
   getPokemonSelector,
   findPokemonSelector,
+  captureHpState: () => captureHpState(),
   TYPE_PARTICLE_COLORS,
 };
 
@@ -2055,7 +2056,10 @@ function onlineConfirmSetup() {
 // ============================================================
 function onlineConfirmDeck() {
   if (dbSelection.length !== 15) return;
-  sendMsg({ type: 'confirmDeck', deck: dbSelection });
+  // processDeckConfirm expects { pokemon: [{name, heldItem}], items: [{name}] }
+  const pokemon = dbSelection.filter(c => c.type === 'pokemon').map(c => ({ name: c.name, heldItem: null }));
+  const items = dbSelection.filter(c => c.type === 'items').map(c => ({ name: c.name }));
+  sendMsg({ type: 'confirmDeck', deck: { pokemon, items } });
 }
 
 // ============================================================

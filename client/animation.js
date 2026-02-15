@@ -99,13 +99,15 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         ctx.focusOnActives();
         await ctx.delay(300);
-        // Use attacker's player number to determine correct side
-        var atkSide = (evt.player && evt.player !== (window.G ? window.G.currentPlayer : 1)) ? '#oppField' : '#youField';
-        ctx.animateEl(atkSide + ' .active-slot', 'attacking', 400);
+        // Use getPokemonSelector which respects _replayPov via meNum()
+        var atkSel = ctx.getPokemonSelector(evt.player || (window.G ? window.G.currentPlayer : 1), -1);
+        ctx.animateEl(atkSel, 'attacking', 400);
         await ctx.delay(400);
         break;
 
       case 'damage':
+        // Capture HP state BEFORE applying damage so animateHpBars sees the change
+        if (ctx.captureHpState) ctx.captureHpState();
         var dmgSel = ctx.getPokemonSelector(evt.targetOwner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
         ctx.showDamagePopup(evt.amount, evt.mult, dmgSel);
         var shakeClass = evt.amount >= 100 ? 'heavy-shake' : evt.amount >= 50 ? 'hit-shake' : 'light-shake';
@@ -131,6 +133,7 @@ var AnimQueue = (function() {
         break;
 
       case 'selfDamage':
+        if (ctx.captureHpState) ctx.captureHpState();
         var selfSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#youField .active-slot';
         if (selfSel) {
           ctx.showDamagePopupAt(evt.amount, selfSel, false);
@@ -147,6 +150,7 @@ var AnimQueue = (function() {
 
       case 'statusDamage':
       case 'status_tick':
+        if (ctx.captureHpState) ctx.captureHpState();
         var statusOwnerNum = evt.owner || evt.targetOwner;
         var statusSel = ctx.getPokemonSelector(statusOwnerNum, -1);
         var statusColor = evt.status === 'poison' ? '#A33EA1' : '#EE8130';
@@ -224,6 +228,7 @@ var AnimQueue = (function() {
       case 'heal':
       case 'ability_heal':
       case 'item_heal':
+        if (ctx.captureHpState) ctx.captureHpState();
         var healTarget = evt.target || evt.pokemon;
         var healSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(healTarget) : null;
         if (healSel) {
@@ -262,6 +267,7 @@ var AnimQueue = (function() {
         break;
 
       case 'reactiveDamage':
+        if (ctx.captureHpState) ctx.captureHpState();
         var rdSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.target) : null;
         if (rdSel) {
           ctx.showDamagePopupAt(evt.amount, rdSel, false);
@@ -277,6 +283,7 @@ var AnimQueue = (function() {
         break;
 
       case 'recoilDamage':
+        if (ctx.captureHpState) ctx.captureHpState();
         var rcSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#youField .active-slot';
         if (rcSel) ctx.showDamagePopupAt(evt.amount, rcSel, false);
         // Progressively apply recoil damage
