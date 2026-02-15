@@ -368,7 +368,9 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
   _deps();
   var events = [];
 
-  if (!defender.heldItem || defender.hp <= 0) return events;
+  // Reactive on-damaged items should still trigger even if the holder was
+  // KO'd by the hit (e.g. Rocky Helmet retaliation on lethal contact).
+  if (!defender.heldItem) return events;
 
   // Weakness Policy (special: energy gain on super-effective)
   var wpResult = ItemDB.runItemHook('onDamagedByAttack', defender.heldItem, {
@@ -433,8 +435,9 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
  * @param {number} defenderOwner - Player number owning defender
  * @returns {Object} { result: calcResult, ko: boolean, events: [] }
  */
-function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defenderOwner) {
+function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defenderOwner, options) {
   _deps();
+  options = options || {};
   var attackerOwner = Constants.opp(defenderOwner);
   var events = [];
 
@@ -472,29 +475,36 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
 
   // 4. Attacker-side item effects (Shell Bell heal, Life Orb recoil)
   if (attacker.heldItem) {
-    var atkResult = ItemDB.runItemHook('onAttack', attacker.heldItem, {
-      holder: attacker, attacker: attacker, defender: defender,
-      didDamage: result.damage > 0, G: G
-    });
-    if (atkResult) {
-      if (atkResult.heal && attacker.damage > 0) {
-        attacker.damage = Math.max(0, attacker.damage - atkResult.heal);
-        attacker.hp = attacker.maxHp - attacker.damage;
-        events.push({
-          type: 'itemProc', item: attacker.heldItem, pokemon: attacker.name,
-          effect: 'heal', amount: atkResult.heal
-        });
-      }
-      if (atkResult.recoil) {
-        var recoilResult = applyDamage(G, attacker, atkResult.recoil, attackerOwner);
-        events.push({
-          type: 'recoilDamage', source: attacker.heldItem, pokemon: attacker.name,
-          amount: atkResult.recoil
-        });
-        events = events.concat(recoilResult.events);
-        if (recoilResult.ko) {
-          var recoilKO = handleKO(G, attacker, attackerOwner);
-          events = events.concat(recoilKO);
+    // One-shot per declared attack action: avoid repeated Shell Bell / Life Orb
+    // procs when a single attack applies damage multiple times (multi-target FX,
+    // self-damage FX that uses the same pipeline, etc.).
+    var attackSeq = options.attackSeq || G.attackSeq || 0;
+    if (attacker._lastOnAttackItemSeq !== attackSeq) {
+      attacker._lastOnAttackItemSeq = attackSeq;
+      var atkResult = ItemDB.runItemHook('onAttack', attacker.heldItem, {
+        holder: attacker, attacker: attacker, defender: defender,
+        didDamage: result.damage > 0, G: G
+      });
+      if (atkResult) {
+        if (atkResult.heal && attacker.damage > 0) {
+          attacker.damage = Math.max(0, attacker.damage - atkResult.heal);
+          attacker.hp = attacker.maxHp - attacker.damage;
+          events.push({
+            type: 'itemProc', item: attacker.heldItem, pokemon: attacker.name,
+            effect: 'heal', amount: atkResult.heal
+          });
+        }
+        if (atkResult.recoil) {
+          var recoilResult = applyDamage(G, attacker, atkResult.recoil, attackerOwner);
+          events.push({
+            type: 'recoilDamage', source: attacker.heldItem, pokemon: attacker.name,
+            amount: atkResult.recoil
+          });
+          events = events.concat(recoilResult.events);
+          if (recoilResult.ko) {
+            var recoilKO = handleKO(G, attacker, attackerOwner);
+            events = events.concat(recoilKO);
+          }
         }
       }
     }
