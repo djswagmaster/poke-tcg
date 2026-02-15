@@ -61,6 +61,19 @@ var AnimQueue = (function() {
   // }
   // ============================================================
 
+  // Helper: find a pokemon object in window.G by name string
+  function _findPokemonObj(name) {
+    if (typeof window === 'undefined' || !window.G) return null;
+    for (var pNum = 1; pNum <= 2; pNum++) {
+      var p = window.G.players[pNum];
+      if (p.active && p.active.name === name) return p.active;
+      for (var i = 0; i < p.bench.length; i++) {
+        if (p.bench[i].name === name) return p.bench[i];
+      }
+    }
+    return null;
+  }
+
   function replayEvents(events, animCtx) {
     if (!events || events.length === 0) return;
 
@@ -103,6 +116,16 @@ var AnimQueue = (function() {
           var count = evt.amount >= 100 ? 22 : evt.amount >= 50 ? 18 : 14;
           ctx.spawnParticlesAtEl(dmgSel, color, count, { spread: evt.amount >= 100 ? 75 : 55 });
         }
+        // Progressively apply damage to snapshot state so HP bars update
+        if (typeof window !== 'undefined' && window.G && evt.targetOwner) {
+          var dmgOwner = window.G.players[evt.targetOwner];
+          var bIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : -1;
+          var dmgTarget = bIdx === -1 ? dmgOwner.active : dmgOwner.bench[bIdx];
+          if (dmgTarget) {
+            dmgTarget.damage = (dmgTarget.damage || 0) + evt.amount;
+            dmgTarget.hp = Math.max(0, dmgTarget.maxHp - dmgTarget.damage);
+          }
+        }
         ctx.renderBattle();
         await ctx.delay(evt.amount >= 100 ? 1400 : evt.amount >= 50 ? 1100 : 900);
         break;
@@ -113,17 +136,33 @@ var AnimQueue = (function() {
           ctx.showDamagePopupAt(evt.amount, selfSel, false);
           ctx.animateEl(selfSel, 'hit-shake', 500);
         }
+        // Progressively apply self damage
+        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
+          var sdPk = _findPokemonObj(evt.pokemon);
+          if (sdPk) { sdPk.damage = (sdPk.damage || 0) + evt.amount; sdPk.hp = Math.max(0, sdPk.maxHp - sdPk.damage); }
+        }
         ctx.renderBattle();
         await ctx.delay(500);
         break;
 
       case 'statusDamage':
       case 'status_tick':
-        var statusSel = ctx.getPokemonSelector(evt.owner || evt.targetOwner, -1);
+        var statusOwnerNum = evt.owner || evt.targetOwner;
+        var statusSel = ctx.getPokemonSelector(statusOwnerNum, -1);
         var statusColor = evt.status === 'poison' ? '#A33EA1' : '#EE8130';
         ctx.spawnParticlesAtEl(statusSel, statusColor, 10, { spread: 40, size: 5 });
         ctx.animateEl(statusSel, 'status-apply', 500);
-        ctx.showDamagePopupAt(evt.damage || evt.amount, statusSel, false);
+        var statusDmgAmt = evt.damage || evt.amount;
+        ctx.showDamagePopupAt(statusDmgAmt, statusSel, false);
+        // Progressively apply status damage to snapshot state
+        if (typeof window !== 'undefined' && window.G && statusOwnerNum && statusDmgAmt) {
+          var stOwner = window.G.players[statusOwnerNum];
+          var stTarget = stOwner.active;
+          if (stTarget) {
+            stTarget.damage = (stTarget.damage || 0) + statusDmgAmt;
+            stTarget.hp = Math.max(0, stTarget.maxHp - stTarget.damage);
+          }
+        }
         ctx.renderBattle();
         await ctx.delay(600);
         break;
@@ -133,6 +172,21 @@ var AnimQueue = (function() {
         ctx.animateEl(koSel, 'ko-fall', 600);
         ctx.spawnParticlesAtEl(koSel, '#ef4444', 20, { spread: 70, size: 4 });
         await ctx.delay(600);
+        // Remove the KO'd pokemon from snapshot state so re-render shows it gone
+        if (typeof window !== 'undefined' && window.G && evt.owner) {
+          var koOwner = window.G.players[evt.owner];
+          if (koOwner.active && koOwner.active.name === evt.pokemon) {
+            koOwner.active = null;
+          } else {
+            var koBIdx = koOwner.bench.findIndex(function(p) { return p.name === evt.pokemon; });
+            if (koBIdx >= 0) koOwner.bench.splice(koBIdx, 1);
+          }
+          // Update KO counter
+          var scorerNum = evt.owner === 1 ? 2 : 1;
+          if (evt.scorerKOs !== undefined) {
+            window.G.players[scorerNum].kos = evt.scorerKOs;
+          }
+        }
         ctx.renderBattle();
         await ctx.delay(400);
         break;
@@ -144,6 +198,11 @@ var AnimQueue = (function() {
           ctx.animateEl(statApplySel, 'status-apply', 500);
           ctx.spawnParticlesAtEl(statApplySel, statColor[evt.status] || '#999', 10, { spread: 40 });
         }
+        // Progressively apply status to snapshot state
+        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.status) {
+          var saPk = _findPokemonObj(evt.pokemon);
+          if (saPk) saPk.status = evt.status;
+        }
         ctx.renderBattle();
         await ctx.delay(500);
         break;
@@ -152,6 +211,11 @@ var AnimQueue = (function() {
         var cureSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
         if (cureSel) {
           ctx.animateEl(cureSel, 'status-cure', 500);
+        }
+        // Progressively clear status from snapshot state
+        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
+          var scPk = _findPokemonObj(evt.pokemon);
+          if (scPk) scPk.status = null;
         }
         ctx.renderBattle();
         await ctx.delay(400);
@@ -165,6 +229,14 @@ var AnimQueue = (function() {
         if (healSel) {
           ctx.showDamagePopupAt(evt.amount, healSel, true);
           ctx.animateEl(healSel, 'heal-pulse', 500);
+        }
+        // Progressively apply heal to snapshot state
+        if (typeof window !== 'undefined' && window.G && healTarget && evt.amount) {
+          var healPk = _findPokemonObj(healTarget);
+          if (healPk) {
+            healPk.damage = Math.max(0, (healPk.damage || 0) - evt.amount);
+            healPk.hp = healPk.maxHp - healPk.damage;
+          }
         }
         ctx.renderBattle();
         await ctx.delay(500);
@@ -195,6 +267,11 @@ var AnimQueue = (function() {
           ctx.showDamagePopupAt(evt.amount, rdSel, false);
           ctx.animateEl(rdSel, 'hit-shake', 500);
         }
+        // Progressively apply reactive damage
+        if (typeof window !== 'undefined' && window.G && evt.target && evt.amount) {
+          var rdPk = _findPokemonObj(evt.target);
+          if (rdPk) { rdPk.damage = (rdPk.damage || 0) + evt.amount; rdPk.hp = Math.max(0, rdPk.maxHp - rdPk.damage); }
+        }
         ctx.renderBattle();
         await ctx.delay(400);
         break;
@@ -202,6 +279,11 @@ var AnimQueue = (function() {
       case 'recoilDamage':
         var rcSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#youField .active-slot';
         if (rcSel) ctx.showDamagePopupAt(evt.amount, rcSel, false);
+        // Progressively apply recoil damage
+        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
+          var rcPk = _findPokemonObj(evt.pokemon);
+          if (rcPk) { rcPk.damage = (rcPk.damage || 0) + evt.amount; rcPk.hp = Math.max(0, rcPk.maxHp - rcPk.damage); }
+        }
         ctx.renderBattle();
         await ctx.delay(300);
         break;
@@ -214,6 +296,11 @@ var AnimQueue = (function() {
           ctx.animateEl(egSel, 'energy-gain', 400);
           ctx.spawnParticlesAtEl(egSel, '#F7D02C', 6, { spread: 30, size: 4 });
         }
+        // Progressively apply energy gain to snapshot state
+        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
+          var egPk = ctx.findPokemonSelector ? _findPokemonObj(evt.pokemon) : null;
+          if (egPk) egPk.energy = (egPk.energy || 0) + (evt.amount || 1);
+        }
         ctx.renderBattle();
         await ctx.delay(400);
         break;
@@ -221,6 +308,10 @@ var AnimQueue = (function() {
       case 'mana_gain':
       case 'manaGain':
         ctx.showManaPopup(evt.amount);
+        // Progressively apply mana gain to snapshot state
+        if (typeof window !== 'undefined' && window.G && evt.player) {
+          window.G.players[evt.player].mana += evt.amount;
+        }
         ctx.renderBattle();
         await ctx.delay(300);
         break;
@@ -228,6 +319,16 @@ var AnimQueue = (function() {
       case 'switch_turn':
         ctx.showTurnOverlay(evt.playerName || ('Player ' + evt.player + "'s Turn"));
         await ctx.delay(1000);
+        // Flip the hot-seat POV to the new player right when this event fires,
+        // so the re-render shows the board from the new player's perspective.
+        if (typeof window !== 'undefined' && window._replayPov != null) {
+          window._replayPov = evt.player;
+        }
+        // Progressively update turn state in snapshot
+        if (typeof window !== 'undefined' && window.G) {
+          window.G.currentPlayer = evt.player;
+          if (evt.turn) window.G.turn = evt.turn;
+        }
         ctx.renderBattle();
         break;
 

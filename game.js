@@ -95,10 +95,13 @@ function opp(p) { return p === 1 ? 2 : 1; }
 function cp() { return G.players[G.currentPlayer]; }
 function op() { return G.players[opp(G.currentPlayer)]; }
 // For rendering: me() is always the local player, them() is always the opponent
-function me() { return isOnline ? G.players[myPlayerNum] : G.players[G.currentPlayer]; }
-function them() { return isOnline ? G.players[opp(myPlayerNum)] : G.players[opp(G.currentPlayer)]; }
-function meNum() { return isOnline ? myPlayerNum : G.currentPlayer; }
-function themNum() { return isOnline ? opp(myPlayerNum) : opp(G.currentPlayer); }
+// _replayPov overrides the POV during offline animation replay so the view
+// stays from the acting player's perspective until the switch_turn event fires.
+window._replayPov = null;
+function me() { return isOnline ? G.players[myPlayerNum] : G.players[window._replayPov || G.currentPlayer]; }
+function them() { return isOnline ? G.players[opp(myPlayerNum)] : G.players[opp(window._replayPov || G.currentPlayer)]; }
+function meNum() { return isOnline ? myPlayerNum : (window._replayPov || G.currentPlayer); }
+function themNum() { return isOnline ? opp(myPlayerNum) : opp(window._replayPov || G.currentPlayer); }
 function isMyTurn() { return !isOnline || G.currentPlayer === myPlayerNum; }
 
 function addLog(text, cls='') {
@@ -305,18 +308,40 @@ function dispatchAction(action) {
   G.animating = true;
   G.events = [];
   const playerNum = action._playerNum || G.currentPlayer;
+
+  // Lock the POV to the acting player so animations render from their
+  // perspective. The switch_turn animation handler will update _replayPov
+  // to the new player when it fires (see animation.js).
+  if (!isOnline) window._replayPov = playerNum;
+
+  // Snapshot the game state BEFORE processing so we can render from the
+  // pre-action state during animation replay. processAction mutates G
+  // synchronously (deals damage, KOs, switches turns) but we want the
+  // animations to show those changes progressively.
+  const snapshot = snapshotGameState();
+
   const result = GameLogic.processAction(G, playerNum, action);
   const events = G.events.slice(); // copy
   G.events = [];
 
   if (!result && events.length === 0) {
+    window._replayPov = null;
     G.animating = false;
     return;
   }
 
+  // Save the final (post-action) state, restore the pre-action snapshot
+  // so animations render progressively. The online replayEvents path
+  // does the same thing (defers state update until after replay).
+  const finalState = snapshotGameState();
+  restoreGameState(snapshot);
+
   // Replay events through animation queue
   AnimQueue.replayEvents(events, animCtx);
   AnimQueue.setOnDrain(() => {
+    // Restore the real final state now that animations are done
+    restoreGameState(finalState);
+    window._replayPov = null;
     G.animating = false;
     // Check win
     if (G.winner) {
@@ -324,6 +349,50 @@ function dispatchAction(action) {
     }
     renderBattle();
   });
+}
+
+// Snapshot/restore helpers for animation replay.
+// Only captures the fields that change during processAction and affect rendering.
+function snapshotGameState() {
+  const snap = {
+    currentPlayer: G.currentPlayer,
+    turn: G.turn,
+    winner: G.winner,
+    targeting: G.targeting,
+    pendingRetreats: G.pendingRetreats.slice(),
+    log: G.log.slice(),
+    players: {}
+  };
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const p = G.players[pNum];
+    snap.players[pNum] = {
+      mana: p.mana,
+      kos: p.kos,
+      active: p.active ? Object.assign({}, p.active) : null,
+      bench: p.bench.map(pk => Object.assign({}, pk)),
+      hand: p.hand.slice(),
+      usedAbilities: Object.assign({}, p.usedAbilities),
+    };
+  }
+  return snap;
+}
+
+function restoreGameState(snap) {
+  G.currentPlayer = snap.currentPlayer;
+  G.turn = snap.turn;
+  G.winner = snap.winner;
+  G.targeting = snap.targeting;
+  G.pendingRetreats = snap.pendingRetreats;
+  G.log = snap.log;
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const sp = snap.players[pNum];
+    G.players[pNum].mana = sp.mana;
+    G.players[pNum].kos = sp.kos;
+    G.players[pNum].active = sp.active;
+    G.players[pNum].bench = sp.bench;
+    G.players[pNum].hand = sp.hand;
+    G.players[pNum].usedAbilities = sp.usedAbilities;
+  }
 }
 
 // Get shake class based on damage amount
