@@ -350,8 +350,12 @@ function doAttack(G, attackIndex, actionOpts) {
   addLog(G, attacker.name + ' uses ' + attack.name + '!', 'info');
   G.events.push({ type: 'attack_declare', attacker: attacker.name, attack: attack.name, attackIndex: attackIndex, player: G.currentPlayer });
 
+  // Guard id for one-shot attacker item hooks (e.g. Shell Bell/Life Orb)
+  // so they only resolve once per attack action.
+  G.attackSeq = (G.attackSeq || 0) + 1;
+
   // Execute full attack
-  executeAttack(G, attacker, attack, data.types, fx, p, useOptBoost);
+  executeAttack(G, attacker, attack, data.types, fx, p, useOptBoost, G.attackSeq);
   return true;
 }
 
@@ -386,13 +390,15 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   addLog(G, attacker.name + ' uses ' + attack.name + '! (copied)', 'info');
   G.events.push({ type: 'attack_declare', attacker: attacker.name, attack: attack.name, copied: true, source: sourceName, player: G.currentPlayer });
 
+  G.attackSeq = (G.attackSeq || 0) + 1;
+
   // Use ATTACKER's types for damage, not source's
-  executeAttack(G, attacker, attack, attData.types, fx, p, false);
+  executeAttack(G, attacker, attack, attData.types, fx, p, false, G.attackSeq);
   return true;
 }
 
 // --- Core Attack Execution ---
-function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost) {
+function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, attackSeq) {
   _deps();
   var defender = op(G).active;
   var oppPlayerNum = opp(G.currentPlayer);
@@ -406,6 +412,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost) {
     var snipeResult = FXHandlers.processAll(G, 'snipe', attacker, defender, attack, useOptBoost);
     if (snipeResult.signal === 'pendingTarget') {
       G.targeting = { type: snipeResult.targetingInfo.type, validTargets: snipeResult.targetingInfo.validTargets, attackInfo: snipeResult.targetingInfo };
+      G.targeting.attackInfo.attackSeq = attackSeq;
       G.events = G.events.concat(snipeResult.events);
       return;
     }
@@ -416,7 +423,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost) {
   // Main damage
   var needsDmg = attack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
   if (needsDmg) {
-    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, attack, attackerTypes, oppPlayerNum);
+    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, attack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
     G.events = G.events.concat(damageResult.events);
 
     if (damageResult.result.mult > 1) addLog(G, 'Super Effective!', 'effect');
@@ -432,6 +439,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost) {
 
   if (fxResult.signal === 'pendingTarget') {
     G.targeting = { type: fxResult.targetingInfo.type, validTargets: fxResult.targetingInfo.validTargets, attackInfo: fxResult.targetingInfo };
+    G.targeting.attackInfo.attackSeq = attackSeq;
     return;
   }
   if (fxResult.signal === 'pendingRetreat') {
@@ -471,7 +479,9 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
 
   // Calculate damage on target
   var sniperAtk = { baseDmg: info.baseDmg, fx: '' };
-  var result = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, sniperAtk, info.attackerTypes, targetPlayer);
+  var result = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, sniperAtk, info.attackerTypes, targetPlayer, {
+    attackSeq: info.attackSeq
+  });
   G.events = G.events.concat(result.events);
 
   if (result.result.mult > 1) addLog(G, 'Super Effective!', 'effect');
