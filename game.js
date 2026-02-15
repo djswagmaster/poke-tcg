@@ -200,6 +200,7 @@ function findPokemonSelector(pokemon) {
 }
 
 // Snapshot all pokemon HP% before render
+let _hpPreCaptured = false; // Flag: true when replay pre-captured HP before damage
 function captureHpState() {
   for (let pNum = 1; pNum <= 2; pNum++) {
     const p = G.players[pNum];
@@ -295,7 +296,7 @@ const animCtx = {
   focusOnActives,
   getPokemonSelector,
   findPokemonSelector,
-  captureHpState: () => captureHpState(),
+  captureHpState: () => { captureHpState(); _hpPreCaptured = true; },
   TYPE_PARTICLE_COLORS,
 };
 
@@ -913,7 +914,12 @@ function renderBattle() {
       _animating = false;
     }
   }
-  captureHpState();
+  // Skip capture if replay already pre-captured HP before damage
+  if (_hpPreCaptured) {
+    _hpPreCaptured = false;
+  } else {
+    captureHpState();
+  }
   const myP = me();
   const theirP = them();
 
@@ -1630,6 +1636,7 @@ async function replayEvents(events) {
         break;
       }
       case 'damage': {
+        captureHpState(); _hpPreCaptured = true; // Snapshot HP BEFORE applying damage so animateHpBars sees the delta
         const dmgSel = evtSel(event.targetOwner, event.benchIdx);
         showDamagePopup(event.amount, event.mult, dmgSel);
         animateEl(dmgSel, getShakeClass(event.amount), getShakeDuration(event.amount));
@@ -1650,10 +1657,22 @@ async function replayEvents(events) {
         break;
       }
       case 'selfDamage': {
+        captureHpState(); _hpPreCaptured = true;
         const selfSel = findSel(event.pokemon);
         if (selfSel) {
           showDamagePopupAt(event.amount, selfSel, false);
           animateEl(selfSel, 'hit-shake', 500);
+        }
+        // Apply self-damage to local state
+        if (event.pokemon) {
+          for (let pNum = 1; pNum <= 2; pNum++) {
+            const p = G.players[pNum];
+            if (p.active && p.active.name === event.pokemon) {
+              p.active.damage = (p.active.damage || 0) + event.amount;
+              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
+              break;
+            }
+          }
         }
         renderBattle();
         await delay(500);
@@ -1699,6 +1718,7 @@ async function replayEvents(events) {
       }
       case 'statusDamage':
       case 'status_tick': {
+        captureHpState(); _hpPreCaptured = true;
         const tickOwnerNum = event.owner || event.targetOwner;
         const tickSel = evtSel(tickOwnerNum, -1);
         const tickColors = { poison: '#A33EA1', burn: '#EE8130' };
@@ -1720,12 +1740,26 @@ async function replayEvents(events) {
       case 'heal':
       case 'ability_heal':
       case 'item_heal': {
+        captureHpState(); _hpPreCaptured = true;
         const healName = event.target || event.pokemon;
         const healSel = findSel(healName);
         if (healSel) {
           animateEl(healSel, 'heal-pulse', 500);
           spawnParticlesAtEl(healSel, '#4ade80', 8, {spread:30});
           showDamagePopupAt(event.amount, healSel, true);
+        }
+        // Apply heal to local state
+        if (healName) {
+          for (let pNum = 1; pNum <= 2; pNum++) {
+            const p = G.players[pNum];
+            const allPk = [p.active, ...p.bench].filter(Boolean);
+            const target = allPk.find(pk => pk.name === healName);
+            if (target) {
+              target.damage = Math.max(0, (target.damage || 0) - (event.amount || 0));
+              target.hp = Math.min(target.maxHp, target.maxHp - target.damage);
+              break;
+            }
+          }
         }
         renderBattle();
         await delay(500);
@@ -1783,18 +1817,42 @@ async function replayEvents(events) {
         break;
       }
       case 'reactiveDamage': {
+        captureHpState(); _hpPreCaptured = true;
         const rdSel = findSel(event.target);
         if (rdSel) {
           showDamagePopupAt(event.amount, rdSel, false);
           animateEl(rdSel, 'hit-shake', 500);
+        }
+        // Apply reactive damage to local state
+        if (event.target) {
+          for (let pNum = 1; pNum <= 2; pNum++) {
+            const p = G.players[pNum];
+            if (p.active && p.active.name === event.target) {
+              p.active.damage = (p.active.damage || 0) + event.amount;
+              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
+              break;
+            }
+          }
         }
         renderBattle();
         await delay(400);
         break;
       }
       case 'recoilDamage': {
+        captureHpState(); _hpPreCaptured = true;
         const rcSel = findSel(event.pokemon);
         if (rcSel) showDamagePopupAt(event.amount, rcSel, false);
+        // Apply recoil damage to local state
+        if (event.pokemon) {
+          for (let pNum = 1; pNum <= 2; pNum++) {
+            const p = G.players[pNum];
+            if (p.active && p.active.name === event.pokemon) {
+              p.active.damage = (p.active.damage || 0) + event.amount;
+              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
+              break;
+            }
+          }
+        }
         renderBattle();
         await delay(300);
         break;
@@ -2048,7 +2106,34 @@ function onlineAssignSetupItem(itemName) {
 
 function onlineConfirmSetup() {
   if (onlineSetupItemFor) return;
-  sendMsg({ type: 'setupChoice', choices: onlineSetupSelected });
+  const myP = G.players[myPlayerNum];
+  const isActive = G.phase === 'setupActive';
+
+  if (isActive) {
+    // processSetupChoice expects { activeIdx, itemIdx }
+    const sel = onlineSetupSelected[0];
+    if (!sel) return;
+    const activeIdx = myP.hand.findIndex(c => c.type === 'pokemon' && c.name === sel.name);
+    if (activeIdx === -1) return;
+    let itemIdx = null;
+    if (sel.heldItem) {
+      itemIdx = myP.hand.findIndex(c => c.type === 'items' && c.name === sel.heldItem);
+      if (itemIdx === -1) itemIdx = null;
+    }
+    sendMsg({ type: 'setupChoice', choices: { activeIdx, itemIdx } });
+  } else {
+    // processSetupChoice expects { benchSelections: [{handIdx, itemIdx}] }
+    const benchSelections = onlineSetupSelected.map(sel => {
+      const handIdx = myP.hand.findIndex(c => c.type === 'pokemon' && c.name === sel.name);
+      let itemIdx = null;
+      if (sel.heldItem) {
+        itemIdx = myP.hand.findIndex(c => c.type === 'items' && c.name === sel.heldItem);
+        if (itemIdx === -1) itemIdx = null;
+      }
+      return { handIdx, itemIdx };
+    }).filter(s => s.handIdx !== -1);
+    sendMsg({ type: 'setupChoice', choices: { benchSelections } });
+  }
 }
 
 // ============================================================

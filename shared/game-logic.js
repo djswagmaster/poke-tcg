@@ -1020,10 +1020,14 @@ function processDeckConfirm(G, playerNum, deckData) {
     var tmp = p.deck[i]; p.deck[i] = p.deck[j]; p.deck[j] = tmp;
   }
 
-  p.hand = p.deck.splice(0, 5);
+  // Give player all cards during setup (not a TCG draw)
+  p.hand = p.deck.splice(0, p.deck.length);
   p.ready = true;
 
   if (G.players[1].ready && G.players[2].ready) {
+    // Set setup mana (matches offline startSetupPhase)
+    G.players[1].mana = 7;
+    G.players[2].mana = 7;
     G.phase = 'setupActive';
     G.currentPlayer = 1;
     G.events.push({ type: 'phase_change', phase: 'setupActive' });
