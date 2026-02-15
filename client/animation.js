@@ -314,7 +314,8 @@ var AnimQueue = (function() {
 
       case 'mana_gain':
       case 'manaGain':
-        ctx.showManaPopup(evt.amount);
+        if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
+        else ctx.showManaPopup(evt.amount);
         // Progressively apply mana gain to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.player) {
           window.G.players[evt.player].mana += evt.amount;
@@ -332,6 +333,19 @@ var AnimQueue = (function() {
           window._replayPov = evt.player;
         }
         // Progressively update turn state in snapshot
+        if (typeof window !== 'undefined' && window.G) {
+          window.G.currentPlayer = evt.player;
+          if (evt.turn) window.G.turn = evt.turn;
+        }
+        ctx.renderBattle();
+        break;
+
+      case 'extra_turn_start':
+        ctx.showTurnOverlay((evt.playerName || ('Player ' + evt.player)) + ' gets an extra turn!');
+        await ctx.delay(1000);
+        if (typeof window !== 'undefined' && window._replayPov != null) {
+          window._replayPov = evt.player;
+        }
         if (typeof window !== 'undefined' && window.G) {
           window.G.currentPlayer = evt.player;
           if (evt.turn) window.G.turn = evt.turn;

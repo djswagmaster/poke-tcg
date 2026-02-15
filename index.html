@@ -17,7 +17,7 @@
 <!-- WIN OVERLAY -->
 <div class="win-overlay" id="winOverlay">
   <div class="win-title">🏆 <span id="winName"></span> Wins!</div>
-  <div class="win-sub">First to 5 KOs!</div>
+  <div class="win-sub">First to 6 KOs!</div>
   <button class="win-btn" onclick="location.reload()">Play Again</button>
 </div>
 
@@ -63,7 +63,10 @@
           <div class="db-count" id="dbCount">0/15 cards</div>
         </div>
         <div class="db-sidebar-list" id="dbSidebarList"></div>
-        <div class="db-confirm"><button class="db-confirm-btn disabled" id="dbConfirmBtn" onclick="confirmDeck()">0/15 selected</button></div>
+        <div class="db-confirm">
+          <button class="db-random-btn" id="dbRandomBtn" onclick="randomizeDeckSelection()">🎲 Random 15</button>
+          <button class="db-confirm-btn disabled" id="dbConfirmBtn" onclick="confirmDeck()">0/15 selected</button>
+        </div>
       </div>
     </div>
   </div>

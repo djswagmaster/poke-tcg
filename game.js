@@ -33,8 +33,8 @@ void 0; // placeholder
 const G = {
   phase:'deckBuildP1', currentPlayer:1, turn:0,
   players: {
-    1: { name:'Player 1', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{} },
-    2: { name:'Player 2', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{} },
+    1: { name:'Player 1', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
+    2: { name:'Player 2', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
   },
   log: [],
   events: [], // Event array used by shared game-logic
@@ -76,7 +76,10 @@ setInterval(() => {
 
 function getImg(name) {
   const b64 = CARD_IMAGES[name];
-  return b64 ? 'data:image/png;base64,' + b64 : '';
+  if (b64) return 'data:image/png;base64,' + b64;
+  if (!name) return '';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return 'cards/' + slug + '.png';
 }
 
 function getPokemonData(name) { return POKEMON_DB.find(p => p.name === name); }
@@ -272,6 +275,21 @@ function showManaPopup(amount) {
   setTimeout(() => el.remove(), 1500);
 }
 
+function showManaPopupForPlayer(playerNum, amount) {
+  const side = playerNum === meNum() ? '#youField' : '#oppField';
+  const target = document.querySelector(side + ' .fp-name');
+  const el = document.createElement('div');
+  el.className = 'damage-popup mana-popup';
+  el.textContent = '+' + amount + ' ⬡';
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.4) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+}
+
 // TYPE_PARTICLE_COLORS now imported from shared/constants.js at top of file
 
 // ============================================================
@@ -292,6 +310,7 @@ const animCtx = {
   showDamagePopupAt,
   showEnergyPopup,
   showManaPopup,
+  showManaPopupForPlayer,
   showTurnOverlay,
   focusOnActives,
   getPokemonSelector,
@@ -360,6 +379,7 @@ function snapshotGameState() {
     currentPlayer: G.currentPlayer,
     turn: G.turn,
     winner: G.winner,
+    extraTurnFor: G.extraTurnFor,
     targeting: G.targeting,
     pendingRetreats: G.pendingRetreats.slice(),
     log: G.log.slice(),
@@ -370,6 +390,7 @@ function snapshotGameState() {
     snap.players[pNum] = {
       mana: p.mana,
       kos: p.kos,
+      maxBench: p.maxBench,
       active: p.active ? Object.assign({}, p.active) : null,
       bench: p.bench.map(pk => Object.assign({}, pk)),
       hand: p.hand.slice(),
@@ -383,6 +404,7 @@ function restoreGameState(snap) {
   G.currentPlayer = snap.currentPlayer;
   G.turn = snap.turn;
   G.winner = snap.winner;
+  G.extraTurnFor = snap.extraTurnFor;
   G.targeting = snap.targeting;
   G.pendingRetreats = snap.pendingRetreats;
   G.log = snap.log;
@@ -390,6 +412,7 @@ function restoreGameState(snap) {
     const sp = snap.players[pNum];
     G.players[pNum].mana = sp.mana;
     G.players[pNum].kos = sp.kos;
+    G.players[pNum].maxBench = sp.maxBench || Constants.MAX_BENCH;
     G.players[pNum].active = sp.active;
     G.players[pNum].bench = sp.bench;
     G.players[pNum].hand = sp.hand;
@@ -470,7 +493,16 @@ function actionGrantEnergy(target) {
 // Copied attacks list (populated by renderActionPanel for offline Mew/Ditto)
 let copiedAttacks = [];
 
-async function actionAttack(attackIndex) {
+function getOptBoostMeta(attack) {
+  if (!attack || !attack.fx || !attack.fx.includes('optBoost:')) return null;
+  const parts = attack.fx.split('optBoost:')[1].split(':');
+  const extraDmg = parseInt(parts[0], 10);
+  const energyCost = parseInt(parts[1], 10);
+  if (Number.isNaN(extraDmg) || Number.isNaN(energyCost)) return null;
+  return { extraDmg, energyCost };
+}
+
+async function actionAttack(attackIndex, forceOptBoost = null) {
   if (G.animating) return;
   const myP = isOnline ? me() : cp();
   const attacker = myP.active;
@@ -478,16 +510,11 @@ async function actionAttack(attackIndex) {
   const data = getPokemonData(attacker.name);
   const attack = data.attacks[attackIndex];
 
-  // optBoost prompt (must happen BEFORE dispatching since it uses confirm())
-  let useOptBoost = false;
-  if (attack && attack.fx && attack.fx.includes('optBoost:')) {
-    const parts = attack.fx.split('optBoost:')[1].split(':');
-    const extraDmg = parseInt(parts[0]);
-    const energyCost = parseInt(parts[1]);
-    if (attacker.energy >= energyCost) {
-      useOptBoost = confirm(attack.name + ': Add +' + extraDmg + ' damage by spending ' + energyCost + ' energy?');
-    }
-  }
+  // Choice-based attacks (e.g. optBoost) are selected from separate buttons
+  // in the action panel; no blocking confirm() popup.
+  const opt = getOptBoostMeta(attack);
+  let useOptBoost = forceOptBoost === true;
+  if (opt && useOptBoost && attacker.energy < opt.energyCost) useOptBoost = false;
 
   if (isOnline) {
     sendAction({ actionType: 'attack', attackIndex, useOptBoost });
@@ -526,15 +553,20 @@ function selectTarget(playerNum, benchIdx) {
   dispatchAction({ type: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx });
 }
 
-async function actionCopiedAttack(copiedIdx) {
+async function actionCopiedAttack(copiedIdx, forceOptBoost = null) {
   if (G.animating) return;
   const copied = copiedAttacks[copiedIdx];
   if (!copied) return;
+  const myP = isOnline ? me() : cp();
+  const attacker = myP.active;
+  const opt = copied.attack ? getOptBoostMeta(copied.attack) : null;
+  let useOptBoost = forceOptBoost === true;
+  if (opt && useOptBoost && attacker && attacker.energy < opt.energyCost) useOptBoost = false;
   if (isOnline) {
-    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx });
+    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx, useOptBoost });
     return;
   }
-  dispatchAction({ type: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx });
+  dispatchAction({ type: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx, useOptBoost });
 }
 
 function actionPlayPokemon(handIdx) {
@@ -642,6 +674,19 @@ let dbSelection = [];
 let dbTab = 'pokemon';
 
 function initDeckBuild(playerNum) {
+  if (playerNum === 1) {
+    for (let p = 1; p <= 2; p++) {
+      G.players[p].maxBench = Constants.MAX_BENCH;
+      G.players[p].active = null;
+      G.players[p].bench = [];
+      G.players[p].kos = 0;
+      G.players[p].mana = 0;
+    }
+    G.extraTurnFor = null;
+    G.winner = null;
+    G.turn = 0;
+    G.currentPlayer = 1;
+  }
   G.phase = 'deckBuild';
   dbSelection = [];
   dbTab = 'pokemon';
@@ -686,6 +731,24 @@ function toggleDeckCard(name, type) {
 }
 
 function switchDbTab(tab) { dbTab = tab; renderDeckBuild(); }
+
+function randomizeDeckSelection() {
+  const pool = [
+    ...POKEMON_DB.map(c => ({ name: c.name, type: 'pokemon' })),
+    ...ITEM_DB.map(c => ({ name: c.name, type: 'items' })),
+  ];
+
+  // Fisher-Yates shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+
+  dbSelection = pool.slice(0, 15);
+  renderDeckBuild();
+}
 
 function confirmDeck() {
   if (dbSelection.length !== 15) return;
@@ -792,7 +855,8 @@ function renderSetup() {
       ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
-    for (let i = 0; i < 4; i++) {
+    const maxBench = p.maxBench || Constants.MAX_BENCH;
+    for (let i = 0; i < maxBench; i++) {
       const sel = setupSelected[i];
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="unselectSetup(${i})" style="cursor:pointer"` : ''}>
         ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
@@ -810,11 +874,11 @@ function renderSetup() {
 
 function selectSetupPokemon(name) {
   const isActivePhase = setupStep < 2;
-  if (isActivePhase && setupSelected.length >= 1) return;
-  if (!isActivePhase && setupSelected.length >= 4) return;
-
   const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
   const p = G.players[playerNum];
+  if (isActivePhase && setupSelected.length >= 1) return;
+  if (!isActivePhase && setupSelected.length >= (p.maxBench || Constants.MAX_BENCH)) return;
+
   const data = getPokemonData(name);
   if (p.mana < data.cost) return;
 
@@ -867,12 +931,15 @@ function confirmSetup() {
   if (isActivePhase) {
     const sel = setupSelected[0];
     p.active = makePokemon(sel.name, sel.heldItem);
+    _onPlayAbilityLocal(playerNum, p.active);
     // Remove from hand
     p.hand = p.hand.filter(c => c.name !== sel.name);
     if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
   } else {
     setupSelected.forEach(sel => {
-      p.bench.push(makePokemon(sel.name, sel.heldItem));
+      const setupPk = makePokemon(sel.name, sel.heldItem);
+      p.bench.push(setupPk);
+      _onPlayAbilityLocal(playerNum, setupPk);
       p.hand = p.hand.filter(c => c.name !== sel.name);
       if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
     });
@@ -939,7 +1006,7 @@ function renderBattle() {
 
   for (let p = 1; p <= 2; p++) {
     const kosEl = document.getElementById(`btP${p}Kos`);
-    kosEl.innerHTML = Array(5).fill(0).map((_, i) => `<div class="bt-ko ${i < G.players[p].kos ? 'filled' : ''}"></div>`).join('');
+    kosEl.innerHTML = Array(Constants.KOS_TO_WIN).fill(0).map((_, i) => `<div class="bt-ko ${i < G.players[p].kos ? 'filled' : ''}"></div>`).join('');
   }
 
   // Render fields - "you" is always me, "opp" is always them
@@ -971,7 +1038,7 @@ function renderFieldSide(containerId, player, playerNum) {
   }
 
   // Bench (row on the outside edge)
-  const benchSlots = 4;
+  const benchSlots = player.maxBench || Constants.MAX_BENCH;
   for (let i = 0; i < benchSlots; i++) {
     const pk = player.bench[i];
     if (pk) {
@@ -991,6 +1058,17 @@ function renderFieldSide(containerId, player, playerNum) {
     el.innerHTML = `<div class="field-bench-row">${benchHtml}</div><div class="field-active-row">${activeHtml}</div>`;
   } else {
     el.innerHTML = `<div class="field-active-row">${activeHtml}</div><div class="field-bench-row">${benchHtml}</div>`;
+  }
+}
+
+function _onPlayAbilityLocal(playerNum, pk) {
+  const data = getPokemonData(pk.name);
+  if (!data || !data.ability || data.ability.type !== 'onPlay') return;
+  if (data.ability.key === 'dimensionExpansion') {
+    const p = G.players[playerNum];
+    p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 1;
+    addLog(pk.name + ' expands your bench capacity by 1!', 'effect');
+    G.events.push({ type: 'ability_effect', ability: 'dimensionExpansion', pokemon: pk.name, player: playerNum, maxBench: p.maxBench });
   }
 }
 
@@ -1155,10 +1233,19 @@ function renderActionPanel() {
       const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
       const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-      html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
+      html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
         <span class="atk-name">${atk.name}${dmgLabel}</span>
         <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
       </button>`;
+
+      const opt = getOptBoostMeta(atk);
+      if (opt) {
+        const canUseBoost = canUse && pk.energy >= (cost + opt.energyCost);
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+          <span class="atk-name">${atk.name} ★ Boost${dmgLabel ? ` (+${opt.extraDmg})` : ''}</span>
+          <span class="atk-detail">${costLabel} + ${opt.energyCost}⚡ | ${atk.desc || ''}</span>
+        </button>`;
+      }
     });
 
     // Mew Versatility - show bench allies' attacks
@@ -1171,10 +1258,18 @@ function renderActionPanel() {
           const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
           const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
           const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
             <span class="atk-name">${atk.name}${cdmg}</span>
             <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
           </button>`;
+          const opt = getOptBoostMeta(atk);
+          if (opt) {
+            const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+              <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+              <span class="atk-detail">${cCostLabel} + ${opt.energyCost}⚡ | from ${benchPk.name}</span>
+            </button>`;
+          }
         });
       });
     }
@@ -1189,10 +1284,18 @@ function renderActionPanel() {
         const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
         const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
         const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-        html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
           <span class="atk-name">${atk.name}${cdmg2}</span>
           <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
         </button>`;
+        const opt = getOptBoostMeta(atk);
+        if (opt) {
+          const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+            <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+            <span class="atk-detail">${dCostLabel} + ${opt.energyCost}⚡ | from ${op().active.name}</span>
+          </button>`;
+        }
       });
     }
 
@@ -1327,7 +1430,7 @@ function renderHandPanel() {
   pokemonHand.forEach((c, i) => {
     const realIdx = me.hand.indexOf(c);
     const data = getPokemonData(c.name);
-    const canAfford = me.mana >= data.cost && me.bench.length < 4;
+    const canAfford = me.mana >= data.cost && me.bench.length < (me.maxBench || Constants.MAX_BENCH);
     html += `<div class="ap-hand-card ${canAfford?'':'cant-afford'}" onclick="actionPlayPokemon(${realIdx})">
       <img src="${getImg(c.name)}">
       <div><div class="hc-name">${c.name}</div><div class="hc-cost">${data.cost}⬡ · ${data.hp}HP</div></div>
@@ -1544,6 +1647,7 @@ function applyServerState(state) {
   G.targeting = state.targeting || null;
   G.pendingRetreats = state.pendingRetreats || (state.pendingRetreat ? [state.pendingRetreat] : []);
   G.winner = state.winner || null;
+  G.extraTurnFor = state.extraTurnFor || null;
 
   // Auto-select active card when it's my turn (online)
   if (state.currentPlayer === myPlayerNum && !G.selectedCard) {
@@ -1555,6 +1659,7 @@ function applyServerState(state) {
     G.players[pNum].name = sp.name;
     G.players[pNum].mana = sp.mana;
     G.players[pNum].kos = sp.kos;
+    G.players[pNum].maxBench = sp.maxBench || Constants.MAX_BENCH;
     G.players[pNum].active = sp.active;
     G.players[pNum].bench = sp.bench || [];
     G.players[pNum].usedAbilities = sp.usedAbilities || {};
@@ -1779,7 +1884,8 @@ async function replayEvents(events) {
       }
       case 'mana_gain':
       case 'manaGain': {
-        showManaPopup(event.amount);
+        if (event.player) showManaPopupForPlayer(event.player, event.amount);
+        else showManaPopup(event.amount);
         renderBattle();
         await delay(300);
         break;
@@ -1859,6 +1965,12 @@ async function replayEvents(events) {
       }
       case 'switch_turn': {
         showTurnOverlay(event.playerName || ('Player ' + event.player + "'s Turn"));
+        await delay(1000);
+        renderBattle();
+        break;
+      }
+      case 'extra_turn_start': {
+        showTurnOverlay((event.playerName || ('Player ' + event.player)) + ' gets an extra turn!');
         await delay(1000);
         renderBattle();
         break;
@@ -2055,7 +2167,8 @@ function renderOnlineSetup() {
       ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
-    for (let i = 0; i < 4; i++) {
+    const maxBench = myP.maxBench || Constants.MAX_BENCH;
+    for (let i = 0; i < maxBench; i++) {
       const sel = onlineSetupSelected[i];
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="onlineUnselectSetup(${i})" style="cursor:pointer"` : ''}>
         ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
@@ -2071,11 +2184,11 @@ function renderOnlineSetup() {
 }
 
 function onlineSelectSetupPokemon(name) {
+  const myP = G.players[myPlayerNum];
   const isActive = G.phase === 'setupActive';
   if (isActive && onlineSetupSelected.length >= 1) return;
-  if (!isActive && onlineSetupSelected.length >= 4) return;
+  if (!isActive && onlineSetupSelected.length >= (myP.maxBench || Constants.MAX_BENCH)) return;
   // Enforce remaining mana client-side.
-  const myP = G.players[myPlayerNum];
   const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
   const remainingMana = Math.max(0, (myP.mana || 0) - spent);
   const data = getPokemonData(name);
