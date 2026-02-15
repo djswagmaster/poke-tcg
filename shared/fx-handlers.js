@@ -152,8 +152,8 @@ register('stripEnergy', function(G, ctx, params) {
     }
   }
 
-  ctx.defender.energy = Math.max(0, ctx.defender.energy - (params[0] || 1));
-  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: params[0] || 1 });
+  ctx.defender.energy = Math.max(0, ctx.defender.energy - actual);
+  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual });
   return null;
 });
 

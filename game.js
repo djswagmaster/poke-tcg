@@ -272,6 +272,21 @@ function showManaPopup(amount) {
   setTimeout(() => el.remove(), 1500);
 }
 
+function showManaPopupForPlayer(playerNum, amount) {
+  const side = playerNum === meNum() ? '#youField' : '#oppField';
+  const target = document.querySelector(side + ' .fp-name');
+  const el = document.createElement('div');
+  el.className = 'damage-popup mana-popup';
+  el.textContent = '+' + amount + ' ⬡';
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.4) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+}
+
 // TYPE_PARTICLE_COLORS now imported from shared/constants.js at top of file
 
 // ============================================================
@@ -292,6 +307,7 @@ const animCtx = {
   showDamagePopupAt,
   showEnergyPopup,
   showManaPopup,
+  showManaPopupForPlayer,
   showTurnOverlay,
   focusOnActives,
   getPokemonSelector,
@@ -470,7 +486,16 @@ function actionGrantEnergy(target) {
 // Copied attacks list (populated by renderActionPanel for offline Mew/Ditto)
 let copiedAttacks = [];
 
-async function actionAttack(attackIndex) {
+function getOptBoostMeta(attack) {
+  if (!attack || !attack.fx || !attack.fx.includes('optBoost:')) return null;
+  const parts = attack.fx.split('optBoost:')[1].split(':');
+  const extraDmg = parseInt(parts[0], 10);
+  const energyCost = parseInt(parts[1], 10);
+  if (Number.isNaN(extraDmg) || Number.isNaN(energyCost)) return null;
+  return { extraDmg, energyCost };
+}
+
+async function actionAttack(attackIndex, forceOptBoost = null) {
   if (G.animating) return;
   const myP = isOnline ? me() : cp();
   const attacker = myP.active;
@@ -478,16 +503,11 @@ async function actionAttack(attackIndex) {
   const data = getPokemonData(attacker.name);
   const attack = data.attacks[attackIndex];
 
-  // optBoost prompt (must happen BEFORE dispatching since it uses confirm())
-  let useOptBoost = false;
-  if (attack && attack.fx && attack.fx.includes('optBoost:')) {
-    const parts = attack.fx.split('optBoost:')[1].split(':');
-    const extraDmg = parseInt(parts[0]);
-    const energyCost = parseInt(parts[1]);
-    if (attacker.energy >= energyCost) {
-      useOptBoost = confirm(attack.name + ': Add +' + extraDmg + ' damage by spending ' + energyCost + ' energy?');
-    }
-  }
+  // Choice-based attacks (e.g. optBoost) are selected from separate buttons
+  // in the action panel; no blocking confirm() popup.
+  const opt = getOptBoostMeta(attack);
+  let useOptBoost = forceOptBoost === true;
+  if (opt && useOptBoost && attacker.energy < opt.energyCost) useOptBoost = false;
 
   if (isOnline) {
     sendAction({ actionType: 'attack', attackIndex, useOptBoost });
@@ -526,15 +546,20 @@ function selectTarget(playerNum, benchIdx) {
   dispatchAction({ type: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx });
 }
 
-async function actionCopiedAttack(copiedIdx) {
+async function actionCopiedAttack(copiedIdx, forceOptBoost = null) {
   if (G.animating) return;
   const copied = copiedAttacks[copiedIdx];
   if (!copied) return;
+  const myP = isOnline ? me() : cp();
+  const attacker = myP.active;
+  const opt = copied.attack ? getOptBoostMeta(copied.attack) : null;
+  let useOptBoost = forceOptBoost === true;
+  if (opt && useOptBoost && attacker && attacker.energy < opt.energyCost) useOptBoost = false;
   if (isOnline) {
-    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx });
+    sendAction({ actionType: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx, useOptBoost });
     return;
   }
-  dispatchAction({ type: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx });
+  dispatchAction({ type: 'copiedAttack', sourceName: copied.source, attackIndex: copied.attackIndex !== undefined ? copied.attackIndex : copiedIdx, useOptBoost });
 }
 
 function actionPlayPokemon(handIdx) {
@@ -1155,10 +1180,19 @@ function renderActionPanel() {
       const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
       const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-      html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i})" ${canUse?'':'disabled'}>
+      html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
         <span class="atk-name">${atk.name}${dmgLabel}</span>
         <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
       </button>`;
+
+      const opt = getOptBoostMeta(atk);
+      if (opt) {
+        const canUseBoost = canUse && pk.energy >= (cost + opt.energyCost);
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+          <span class="atk-name">${atk.name} ★ Boost${dmgLabel ? ` (+${opt.extraDmg})` : ''}</span>
+          <span class="atk-detail">${costLabel} + ${opt.energyCost}⚡ | ${atk.desc || ''}</span>
+        </button>`;
+      }
     });
 
     // Mew Versatility - show bench allies' attacks
@@ -1171,10 +1205,18 @@ function renderActionPanel() {
           const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
           const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
           const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
             <span class="atk-name">${atk.name}${cdmg}</span>
             <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
           </button>`;
+          const opt = getOptBoostMeta(atk);
+          if (opt) {
+            const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+              <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+              <span class="atk-detail">${cCostLabel} + ${opt.energyCost}⚡ | from ${benchPk.name}</span>
+            </button>`;
+          }
         });
       });
     }
@@ -1189,10 +1231,18 @@ function renderActionPanel() {
         const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
         const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
         const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
-        html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx})" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
           <span class="atk-name">${atk.name}${cdmg2}</span>
           <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
         </button>`;
+        const opt = getOptBoostMeta(atk);
+        if (opt) {
+          const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+            <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+            <span class="atk-detail">${dCostLabel} + ${opt.energyCost}⚡ | from ${op().active.name}</span>
+          </button>`;
+        }
       });
     }
 
@@ -1779,7 +1829,8 @@ async function replayEvents(events) {
       }
       case 'mana_gain':
       case 'manaGain': {
-        showManaPopup(event.amount);
+        if (event.player) showManaPopupForPlayer(event.player, event.amount);
+        else showManaPopup(event.amount);
         renderBattle();
         await delay(300);
         break;

@@ -314,7 +314,8 @@ var AnimQueue = (function() {
 
       case 'mana_gain':
       case 'manaGain':
-        ctx.showManaPopup(evt.amount);
+        if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
+        else ctx.showManaPopup(evt.amount);
         // Progressively apply mana gain to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.player) {
           window.G.players[evt.player].mana += evt.amount;
