@@ -1052,6 +1052,11 @@ function processSetupChoice(G, playerNum, choices) {
       if (itemCard && itemCard.type === 'items') heldItem = itemCard.name;
     }
 
+    var pokData = PokemonDB.getPokemonData(card.name);
+    var cost = pokData ? pokData.cost : 0;
+    if (p.mana < cost) return false;
+    p.mana -= cost;
+
     p.active = makePokemon(card.name, heldItem);
 
     // Remove from hand
@@ -1080,6 +1085,11 @@ function processSetupChoice(G, playerNum, choices) {
     selections.forEach(function(sel) {
       var bcard = p.hand[sel.handIdx];
       if (!bcard || bcard.type !== 'pokemon') return;
+
+      var bPokData = PokemonDB.getPokemonData(bcard.name);
+      var bCost = bPokData ? bPokData.cost : 0;
+      if (p.mana < bCost) return;
+      p.mana -= bCost;
 
       var bHeldItem = null;
       if (sel.itemIdx !== null && sel.itemIdx !== undefined) {
