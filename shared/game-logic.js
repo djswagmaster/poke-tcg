@@ -393,8 +393,7 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   G.attackSeq = (G.attackSeq || 0) + 1;
 
   // Use ATTACKER's types for damage, not source's
-  var useOptBoost = (actionOpts && actionOpts.useOptBoost) || false;
-  executeAttack(G, attacker, attack, attData.types, fx, p, useOptBoost, G.attackSeq);
+  executeAttack(G, attacker, attack, attData.types, fx, p, false, G.attackSeq);
   return true;
 }
 
