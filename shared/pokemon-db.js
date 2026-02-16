@@ -55,6 +55,9 @@ var POKEMON_DB = [
   {name:"Delibird",types:["Ice","Flying"],cost:2,hp:120,weakness:["Fire"],resistance:["Ground"],
     attacks:[{name:"Gift Delivery",energy:2,baseDmg:0,desc:"Each bench +1 energy",fx:"benchEnergyAll"}]},
 
+  {name:"Dialga",types:["Water","Dragon"],cost:6,hp:280,weakness:["Fighting","Dragon"],resistance:["Ghost","Grass"],
+    attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 4 energy. Take another turn after this one",fx:"selfEnergyLoss:4,extraTurn"}]},
+
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
     ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise"},
     attacks:[{name:"Slap",energy:2,baseDmg:30,desc:"",fx:""}]},
@@ -197,6 +200,10 @@ var POKEMON_DB = [
   {name:"Pichu",types:["Electric"],cost:1,hp:80,weakness:["Ground"],resistance:["Steel"],
     attacks:[{name:"Sparky Generator",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
 
+  {name:"Palkia",types:["Water","Dragon"],cost:6,hp:280,weakness:["Electric","Dragon"],resistance:["Fire","Grass"],
+    ability:{name:"Dimension Expansion",desc:"On play: permanently increase your max bench size by 1",type:"onPlay",key:"dimensionExpansion"},
+    attacks:[{name:"Spacial Rend",energy:4,baseDmg:100,desc:"Damage ignores resistance/reduction and defensive effects",fx:"ignoreReduction"}]},
+
   {name:"Psyduck",types:["Water"],cost:2,hp:140,weakness:["Electric"],resistance:["Fire"],
     attacks:[{name:"Confusion Wave",energy:2,baseDmg:60,desc:"Both actives confused",fx:"confuseBoth"}]},
 
@@ -253,6 +260,18 @@ var POKEMON_DB = [
   {name:"Sylveon",types:["Fairy"],cost:4,hp:250,weakness:["Steel"],resistance:["Dragon"],
     attacks:[{name:"Magical Gift",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"},
              {name:"Hyper Voice",energy:3,baseDmg:90,desc:"",fx:""}]},
+
+
+  {name:"Tyrogue",types:["Fighting"],cost:1,hp:100,weakness:["Flying"],resistance:["Rock"],
+    ability:{name:"Gutsy Generator",desc:"If this Pokemon has any damage on it, gain 1 mana. If you do, your turn ends.",type:"active",key:"gutsyGenerator"},
+    attacks:[{name:"Crash Kick",energy:2,baseDmg:40,desc:"This Pokemon also does 20 damage to itself",fx:"selfDmg:20"}]},
+
+  {name:"Cleffa",types:["Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Water"],
+    attacks:[{name:"Twinkly Generator",energy:1,baseDmg:0,desc:"Grant 1 of your Benched Pokemon +1 energy",fx:"benchEnergy:1"}]},
+
+  {name:"Azurill",types:["Water","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Normal","Water"],
+    ability:{name:"Bouncy Generator",desc:"If this is your Active Pokemon and is Knocked Out, gain 1 mana.",type:"passive",key:"bouncyGenerator"},
+    attacks:[{name:"Squish",energy:2,baseDmg:10,desc:"Heal 10 damage from this Pokemon",fx:"healSelf:10"}]},
 
   {name:"Trevenant",types:["Grass","Ghost"],cost:4,hp:230,weakness:["Dark","Poison"],resistance:["Normal","Water"],
     attacks:[{name:"Forest's Curse",energy:1,baseDmg:30,desc:"All opp Grass-weak",fx:"grassWeakness"},

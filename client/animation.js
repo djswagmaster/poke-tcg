@@ -108,7 +108,10 @@ var AnimQueue = (function() {
       case 'damage':
         // Capture HP state BEFORE applying damage so animateHpBars sees the change
         if (ctx.captureHpState) ctx.captureHpState();
-        var dmgSel = ctx.getPokemonSelector(evt.targetOwner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
+        var dmgBenchIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : -1;
+        var dmgSel = null;
+        if (evt.targetOwner) dmgSel = ctx.getPokemonSelector(evt.targetOwner, dmgBenchIdx);
+        if (!dmgSel && ctx.findPokemonSelector && evt.target) dmgSel = ctx.findPokemonSelector(evt.target);
         ctx.showDamagePopup(evt.amount, evt.mult, dmgSel);
         var shakeClass = evt.amount >= 100 ? 'heavy-shake' : evt.amount >= 50 ? 'hit-shake' : 'light-shake';
         var shakeDur = evt.amount >= 100 ? 700 : evt.amount >= 50 ? 500 : 300;
@@ -119,10 +122,13 @@ var AnimQueue = (function() {
           ctx.spawnParticlesAtEl(dmgSel, color, count, { spread: evt.amount >= 100 ? 75 : 55 });
         }
         // Progressively apply damage to snapshot state so HP bars update
-        if (typeof window !== 'undefined' && window.G && evt.targetOwner) {
-          var dmgOwner = window.G.players[evt.targetOwner];
-          var bIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : -1;
-          var dmgTarget = bIdx === -1 ? dmgOwner.active : dmgOwner.bench[bIdx];
+        if (typeof window !== 'undefined' && window.G) {
+          var dmgTarget = null;
+          if (evt.targetOwner) {
+            var dmgOwner = window.G.players[evt.targetOwner];
+            dmgTarget = dmgBenchIdx === -1 ? dmgOwner.active : dmgOwner.bench[dmgBenchIdx];
+          }
+          if (!dmgTarget && evt.target) dmgTarget = _findPokemonObj(evt.target);
           if (dmgTarget) {
             dmgTarget.damage = (dmgTarget.damage || 0) + evt.amount;
             dmgTarget.hp = Math.max(0, dmgTarget.maxHp - dmgTarget.damage);
@@ -314,7 +320,8 @@ var AnimQueue = (function() {
 
       case 'mana_gain':
       case 'manaGain':
-        ctx.showManaPopup(evt.amount);
+        if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
+        else ctx.showManaPopup(evt.amount);
         // Progressively apply mana gain to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.player) {
           window.G.players[evt.player].mana += evt.amount;
@@ -339,11 +346,35 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         break;
 
+      case 'extra_turn_start':
+        ctx.showTurnOverlay((evt.playerName || ('Player ' + evt.player)) + ' gets an extra turn!');
+        await ctx.delay(1000);
+        if (typeof window !== 'undefined' && window._replayPov != null) {
+          window._replayPov = evt.player;
+        }
+        if (typeof window !== 'undefined' && window.G) {
+          window.G.currentPlayer = evt.player;
+          if (evt.turn) window.G.turn = evt.turn;
+        }
+        ctx.renderBattle();
+        break;
+
       case 'switch_active':
+        if (typeof window !== 'undefined' && window.G && evt.player) {
+          var swOwner = window.G.players[evt.player];
+          if (swOwner) {
+            var fromBenchIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : null;
+            if (fromBenchIdx !== null && swOwner.bench[fromBenchIdx]) {
+              var incoming = swOwner.bench.splice(fromBenchIdx, 1)[0];
+              if (swOwner.active && swOwner.active.hp > 0) swOwner.bench.push(swOwner.active);
+              swOwner.active = incoming;
+            }
+          }
+        }
         var switchSide = '#youField';
         if (evt.player !== window.G.currentPlayer) switchSide = '#oppField';
-        ctx.animateEl(switchSide + ' .active-slot', 'slide-in', 350);
         ctx.renderBattle();
+        ctx.animateEl(switchSide + ' .active-slot', 'slide-in', 350);
         await ctx.delay(500);
         break;
 

@@ -152,8 +152,8 @@ register('stripEnergy', function(G, ctx, params) {
     }
   }
 
-  ctx.defender.energy = Math.max(0, ctx.defender.energy - (params[0] || 1));
-  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: params[0] || 1 });
+  ctx.defender.energy = Math.max(0, ctx.defender.energy - actual);
+  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual });
   return null;
 });
 
@@ -185,6 +185,13 @@ register('selfEnergyLoss', function(G, ctx, params) {
 
   ctx.attacker.energy = Math.max(0, ctx.attacker.energy - v);
   ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: v });
+  return null;
+});
+
+// --- Extra turn ---
+register('extraTurn', function(G, ctx, params) {
+  G.extraTurnFor = ctx.currentPlayer;
+  ctx.events.push({ type: 'extra_turn', player: ctx.currentPlayer, pokemon: ctx.attacker.name });
   return null;
 });
 
