@@ -834,6 +834,7 @@ function renderSetup() {
       const used = setupSelected.some(s => s.heldItem === c.name);
       html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
         <img src="${getImg(c.name)}" alt="${c.name}">
+        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
   } else {
@@ -843,6 +844,7 @@ function renderSetup() {
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `selectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
         <span class="cost-badge">${data.cost}⬡</span>
+        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
   }
@@ -855,14 +857,14 @@ function renderSetup() {
   if (isActivePhase) {
     const sel = setupSelected[0];
     previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="unselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     const maxBench = p.maxBench || Constants.MAX_BENCH;
     for (let i = 0; i < maxBench; i++) {
       const sel = setupSelected[i];
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="unselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }
@@ -1437,6 +1439,7 @@ function renderHandPanel() {
     html += `<div class="ap-hand-card ${canAfford?'':'cant-afford'}" onclick="actionPlayPokemon(${realIdx})">
       <img src="${getImg(c.name)}">
       <div><div class="hc-name">${c.name}</div><div class="hc-cost">${data.cost}⬡ · ${data.hp}HP</div></div>
+      <button class="hc-view-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍 View</button>
     </div>`;
   });
   if (itemHand.length > 0) {
@@ -2004,10 +2007,31 @@ async function replayEvents(events) {
         break;
       }
       case 'ability_effect':
-      case 'ability_targeting':
-      case 'ability_damage': {
+      case 'ability_targeting': {
         renderBattle();
         await delay(400);
+        break;
+      }
+      case 'ability_damage': {
+        captureHpState(); _hpPreCaptured = true;
+        const abSel = findSel(event.target);
+        if (abSel) {
+          showDamagePopupAt(event.amount, abSel, false);
+          animateEl(abSel, 'hit-shake', 450);
+        }
+        if (event.target && event.amount) {
+          for (let pNum = 1; pNum <= 2; pNum++) {
+            const p = G.players[pNum];
+            const allPk = [p.active, ...p.bench].filter(Boolean);
+            const target = allPk.find(pk => pk.name === event.target);
+            if (!target) continue;
+            target.damage = (target.damage || 0) + event.amount;
+            target.hp = Math.max(0, target.maxHp - target.damage);
+            break;
+          }
+        }
+        renderBattle();
+        await delay(450);
         break;
       }
       case 'discard_item': {
@@ -2067,14 +2091,14 @@ function showOnlineSetupScreen(phase) {
     const myConfirmed = `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">
         <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Your Field</div>
         ${myP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-            <img src="${getImg(myP.active.name)}" alt="${myP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
+            <img src="${getImg(myP.active.name)}" alt="${myP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;cursor:zoom-in;" onclick="zoomCard('${myP.active.name.replace(/'/g,"\\'")}')" />
             <div style="display:flex;flex-direction:column;gap:2px;">
               <div style="font-size:12px;">${myP.active.name}</div>
               <div style="font-size:11px;color:#888;">${myP.active.heldItem || 'No item'}</div>
             </div>
           </div>` : '<div style="color:#888;font-size:12px;">(no active yet)</div>'}
         ${myP.bench && myP.bench.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-            ${myP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;" />`).join('')}
+            ${myP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;cursor:zoom-in;" onclick="zoomCard('${pk.name.replace(/'/g,"\\'")}')" />`).join('')}
           </div>` : ''}
       </div>`;
     // Use same opponent rendering logic as renderOnlineSetup.
@@ -2082,7 +2106,7 @@ function showOnlineSetupScreen(phase) {
     let oppPanel = '';
     if (oppP && (oppP.active || (oppP.bench && oppP.bench.length))) {
       const oppActive = oppP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-          <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
+          <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;cursor:zoom-in;" onclick="zoomCard('${oppP.active.name.replace(/'/g,"\\'")}')" />
           <div style="display:flex;flex-direction:column;gap:2px;">
             <div style="font-weight:800;font-size:12px;">Opponent Active</div>
             <div style="font-size:12px;">${oppP.active.name}</div>
@@ -2092,7 +2116,7 @@ function showOnlineSetupScreen(phase) {
       const oppBench = (oppP.bench && oppP.bench.length) ? `<div style="margin-top:8px;">
           <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Opponent Bench</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${oppP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;" />`).join('')}
+            ${oppP.bench.map(pk => `<img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:2px;cursor:zoom-in;" onclick="zoomCard('${pk.name.replace(/'/g,"\\'")}')" />`).join('')}
           </div>
         </div>` : '';
       oppPanel = `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:12px;">${oppActive}${oppBench}</div>`;
@@ -2131,6 +2155,7 @@ function renderOnlineSetup() {
       const used = onlineSetupSelected.some(s => s.heldItem === c.name);
       html += `<div class="setup-card ${used?'placed':''}" onclick="onlineAssignSetupItem('${c.name.replace(/'/g,"\\'")}')">
         <img src="${getImg(c.name)}" alt="${c.name}">
+        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
   } else {
@@ -2140,6 +2165,7 @@ function renderOnlineSetup() {
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `onlineSelectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
         <span class="cost-badge">${data.cost}⬡</span>
+        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
   }
@@ -2153,7 +2179,7 @@ function renderOnlineSetup() {
   const oppP = G.players[opp(myPlayerNum)];
   if (oppP) {
     const oppActive = oppP.active ? `<div style="display:flex;gap:10px;align-items:center;">
-        <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;" />
+        <img src="${getImg(oppP.active.name)}" alt="${oppP.active.name}" style="width:54px;height:54px;object-fit:contain;border-radius:10px;cursor:zoom-in;" onclick="zoomCard('${oppP.active.name.replace(/'/g,"\\'")}')" />
         <div style="display:flex;flex-direction:column;gap:2px;">
           <div style="font-weight:800;font-size:12px;">Opponent Active</div>
           <div style="font-size:12px;">${oppP.active.name}</div>
@@ -2164,7 +2190,7 @@ function renderOnlineSetup() {
         <div style="font-weight:800;font-size:12px;margin-bottom:6px;">Opponent Bench</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           ${oppP.bench.map(pk => `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;min-width:64px;">
-              <img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;" />
+              <img src="${getImg(pk.name)}" alt="${pk.name}" style="width:40px;height:40px;object-fit:contain;cursor:zoom-in;" onclick="zoomCard('${pk.name.replace(/'/g,"\\'")}')" />
               <div style="font-size:10px;text-align:center;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pk.name}</div>
             </div>`).join('')}
         </div>
@@ -2176,14 +2202,14 @@ function renderOnlineSetup() {
   if (isActive) {
     const sel = onlineSetupSelected[0];
     previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="onlineUnselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     const maxBench = myP.maxBench || Constants.MAX_BENCH;
     for (let i = 0; i < maxBench; i++) {
       const sel = onlineSetupSelected[i];
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="onlineUnselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }

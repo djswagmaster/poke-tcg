@@ -407,9 +407,26 @@ var AnimQueue = (function() {
 
       case 'ability_effect':
       case 'ability_targeting':
-      case 'ability_damage':
         ctx.renderBattle();
         await ctx.delay(400);
+        break;
+
+      case 'ability_damage':
+        if (ctx.captureHpState) ctx.captureHpState();
+        var abSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.target) : null;
+        if (abSel) {
+          ctx.showDamagePopupAt(evt.amount, abSel, false);
+          ctx.animateEl(abSel, 'hit-shake', 450);
+        }
+        if (typeof window !== 'undefined' && window.G && evt.target && evt.amount) {
+          var adPk = _findPokemonObj(evt.target);
+          if (adPk) {
+            adPk.damage = (adPk.damage || 0) + evt.amount;
+            adPk.hp = Math.max(0, adPk.maxHp - adPk.damage);
+          }
+        }
+        ctx.renderBattle();
+        await ctx.delay(450);
         break;
 
       case 'discard_item':
