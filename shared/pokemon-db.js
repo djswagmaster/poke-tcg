@@ -55,7 +55,7 @@ var POKEMON_DB = [
   {name:"Delibird",types:["Ice","Flying"],cost:2,hp:120,weakness:["Fire"],resistance:["Ground"],
     attacks:[{name:"Gift Delivery",energy:2,baseDmg:0,desc:"Each bench +1 energy",fx:"benchEnergyAll"}]},
 
-  {name:"Dialga",types:["Steel","Dragon"],cost:6,hp:280,weakness:["Fighting","Dragon"],resistance:["Ghost","Grass"],
+  {name:"Dialga",types:["Water","Dragon"],cost:6,hp:280,weakness:["Fighting","Dragon"],resistance:["Ghost","Grass"],
     attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 4 energy. Take another turn after this one",fx:"selfEnergyLoss:4,extraTurn"}]},
 
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
@@ -273,7 +273,7 @@ var POKEMON_DB = [
   {name:"Cleffa",types:["Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Water"],
     attacks:[{name:"Twinkly Generator",energy:1,baseDmg:0,desc:"Grant 1 of your Benched Pokemon +1 energy",fx:"benchEnergy:1"}]},
 
-  {name:"Azurill",types:["Normal","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Normal","Water"],
+  {name:"Azurill",types:["Water","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Normal","Water"],
     ability:{name:"Bouncy Generator",desc:"If this is your Active Pokemon and is Knocked Out, gain 1 mana.",type:"passive",key:"bouncyGenerator"},
     attacks:[{name:"Squish",energy:2,baseDmg:10,desc:"Heal 10 damage from this Pokemon",fx:"healSelf:10"}]},
 
