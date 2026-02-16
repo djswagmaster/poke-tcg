@@ -880,7 +880,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
   var key = data.ability.key;
   var fromBench = !!(pk !== p.active);
-  if (fromBench && ((key === 'bloodthirsty' || key === 'electroCharge') || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
+  if (fromBench && (data.ability.activeOnly || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
 
   // Check already used (except unlimited ones)
   if (key !== 'magicDrain' && p.usedAbilities[key]) {
@@ -909,7 +909,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (healTargets.length > 0) {
         G.targeting = {
           type: 'softTouch', validTargets: healTargets,
-          attackInfo: { type: 'softTouch', attacker: pk }
+          attackInfo: { sourceType: 'ability', type: 'softTouch', attacker: pk }
         };
         G.events.push({ type: 'ability_targeting', ability: key });
       }
@@ -954,7 +954,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (htTargets.length > 0) {
         G.targeting = {
           type: 'healingTouch', validTargets: htTargets,
-          attackInfo: { type: 'healingTouch', attacker: pk }
+          attackInfo: { sourceType: 'ability', type: 'healingTouch', attacker: pk }
         };
       }
       p.usedAbilities[key] = true;
@@ -971,7 +971,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.targeting = {
         type: 'yummyDelivery',
         validTargets: ydTargets,
-        attackInfo: { type: 'yummyDelivery', attacker: pk }
+        attackInfo: { sourceType: 'ability', type: 'yummyDelivery', attacker: pk }
       };
       G.events.push({ type: 'ability_targeting', ability: key });
       break;
@@ -1033,7 +1033,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (ccTargets.length > 0) {
         G.targeting = {
           type: 'creepingChill', validTargets: ccTargets,
-          attackInfo: { type: 'creepingChill', attacker: pk, baseDmg: 10 }
+          attackInfo: { sourceType: 'ability', type: 'creepingChill', attacker: pk, baseDmg: 10 }
         };
       }
       G.events.push({ type: 'ability_targeting', ability: key });
@@ -1052,7 +1052,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (wsTargets.length === 0) return false;
       G.targeting = {
         type: 'waterShuriken', validTargets: wsTargets,
-        attackInfo: { type: 'waterShuriken', attacker: pk, baseDmg: 50 }
+        attackInfo: { sourceType: 'ability', type: 'waterShuriken', attacker: pk, baseDmg: 50 }
       };
       addLog(G, 'Water Shuriken primed: choose a target.', 'effect');
       G.events.push({ type: 'ability_targeting', ability: key });
@@ -1454,8 +1454,7 @@ function processAction(G, playerNum, action) {
   if (action.type === 'selectTarget') {
     if (!G.targeting) return finish(false);
     // Ability targets
-    var abilityTypes = ['softTouch', 'healingTouch', 'creepingChill', 'waterShuriken', 'yummyDelivery'];
-    if (G.targeting.attackInfo && abilityTypes.indexOf(G.targeting.attackInfo.type) !== -1) {
+    if (G.targeting.attackInfo && G.targeting.attackInfo.sourceType === 'ability') {
       return finish(doAbilityTarget(G, action.targetPlayer, action.targetBenchIdx));
     }
     // Attack targets (snipe, sniperBench, swarmSnipe, selfBenchDmg, anyStrip, multiTarget, benchEnergy)

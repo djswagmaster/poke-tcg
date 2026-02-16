@@ -635,8 +635,17 @@ function useAbility(key) {
 }
 
 
+function getAbilityMetaByKey(key) {
+  if (!key) return null;
+  for (const c of POKEMON_DB) {
+    if (c.ability && c.ability.key === key) return c.ability;
+  }
+  return null;
+}
+
 function abilityRequiresActivePosition(key) {
-  return key === 'bloodthirsty' || key === 'electroCharge';
+  const ability = getAbilityMetaByKey(key);
+  return !!(ability && ability.activeOnly);
 }
 
 function canUseAbilityFromSelection(abilityKey, used, benchIdx) {
