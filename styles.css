@@ -35,6 +35,8 @@ button { cursor:pointer; font-family:inherit; }
 .db-sidebar-item img { width:32px; border-radius:3px; }
 .db-sidebar-item span { font-size:11px; font-weight:600; color:#ccc; }
 .db-confirm { padding:14px; border-top:1px solid rgba(255,255,255,0.06); }
+.db-random-btn { width:100%; padding:10px; margin-bottom:8px; border:1px solid rgba(255,255,255,0.18); border-radius:10px; font-weight:800; font-size:13px; color:#e2e8f0; background:rgba(255,255,255,0.06); transition:all 0.2s; }
+.db-random-btn:hover { background:rgba(255,255,255,0.12); border-color:rgba(251,191,36,0.6); color:#fde68a; }
 .db-confirm-btn { width:100%; padding:12px; border:none; border-radius:10px; font-weight:800; font-size:14px; transition:all 0.2s; }
 .db-confirm-btn.ready { background:linear-gradient(135deg,#4ade80,#22c55e); color:#000; }
 .db-confirm-btn.disabled { background:rgba(255,255,255,0.05); color:#555; pointer-events:none; }
@@ -58,6 +60,7 @@ button { cursor:pointer; font-family:inherit; }
 .setup-hand { flex:1; overflow-y:auto; padding:16px; display:flex; flex-wrap:wrap; gap:10px; align-content:flex-start; }
 .setup-card { width:130px; border-radius:8px; overflow:hidden; cursor:pointer; transition:all 0.2s; position:relative; border:2px solid transparent; }
 .setup-card:hover { transform:translateY(-4px); }
+.setup-card:hover .db-zoom-btn { opacity:1; }
 .setup-card img { width:100%; display:block; }
 .setup-card.selected { border-color:#f59e0b; box-shadow:0 0 12px rgba(245,158,11,0.3); }
 .setup-card.placed { opacity:0.3; pointer-events:none; }
@@ -182,6 +185,8 @@ button { cursor:pointer; font-family:inherit; }
 .ap-hand-card .hc-name { font-size:13px; font-weight:700; color:#bbb; }
 .ap-hand-card .hc-cost { font-size:11px; color:#38bdf8; }
 .ap-hand-card.cant-afford { opacity:0.35; pointer-events:none; }
+.hc-view-btn { margin-left:auto; background:rgba(129,140,248,0.2); color:#c7d2fe; border:1px solid rgba(129,140,248,0.35); border-radius:6px; font-size:10px; font-weight:700; padding:4px 6px; cursor:pointer; }
+.setup-view-btn { margin-top:4px; background:rgba(129,140,248,0.2); color:#c7d2fe; border:1px solid rgba(129,140,248,0.35); border-radius:6px; font-size:10px; font-weight:700; padding:3px 6px; cursor:pointer; }
 
 /* Log */
 .ap-log { width:200px; padding:12px; border-left:1px solid rgba(255,255,255,0.06); overflow-y:auto; }
