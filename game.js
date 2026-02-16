@@ -44,6 +44,11 @@ const G = {
   selectedCard: null, // {playerNum, benchIdx} where benchIdx=-1 means active
 };
 
+// AnimQueue progressive replay mutates window.G during hot-seat animations.
+// Ensure the shared singleton is exposed on window so HP/energy/status updates
+// apply immediately instead of waiting until final-state restore.
+if (typeof window !== 'undefined') window.G = G;
+
 // Track previous HP percentages for smooth bar transitions
 const prevHpPct = {};
 

@@ -888,6 +888,25 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_targeting', ability: key });
       break;
 
+    case 'waterShuriken': // Greninja: 1 mana -> 50 to any (target selection)
+      if (p.mana < 1) return false;
+      p.mana--;
+      p.usedAbilities[key] = true;
+      var wsTargets = [];
+      [G.currentPlayer, opp(G.currentPlayer)].forEach(function(pNum) {
+        var side = G.players[pNum];
+        if (side.active && side.active.hp > 0) wsTargets.push({ player: pNum, idx: -1, pk: side.active });
+        side.bench.forEach(function(bpk, bi) { if (bpk.hp > 0) wsTargets.push({ player: pNum, idx: bi, pk: bpk }); });
+      });
+      if (wsTargets.length === 0) return false;
+      G.targeting = {
+        type: 'waterShuriken', validTargets: wsTargets,
+        attackInfo: { type: 'waterShuriken', attacker: pk, baseDmg: 50 }
+      };
+      addLog(G, 'Water Shuriken primed: choose a target.', 'effect');
+      G.events.push({ type: 'ability_targeting', ability: key });
+      break;
+
     case 'phantomWalk': // Zorua: free retreat (active only)
       if (p.bench.length === 0) return false;
       // Same blockade check but free
@@ -1068,6 +1087,16 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
         G.events = G.events.concat(koEvents);
       }
       break;
+
+    case 'waterShuriken':
+      var shurikenResult = DamagePipeline.applyDamage(G, targetPk, 50, targetPlayer);
+      addLog(G, 'Water Shuriken: 50 to ' + targetPk.name, 'effect');
+      G.events.push({ type: 'ability_damage', ability: 'waterShuriken', target: targetPk.name, amount: 50, owner: targetPlayer });
+      if (shurikenResult.ko) {
+        var shurikenKo = DamagePipeline.handleKO(G, targetPk, targetPlayer);
+        G.events = G.events.concat(shurikenKo);
+      }
+      break;
   }
 
   return true;
@@ -1228,7 +1257,7 @@ function processAction(G, playerNum, action) {
   if (action.type === 'selectTarget') {
     if (!G.targeting) return false;
     // Ability targets
-    var abilityTypes = ['softTouch', 'healingTouch', 'creepingChill'];
+    var abilityTypes = ['softTouch', 'healingTouch', 'creepingChill', 'waterShuriken'];
     if (G.targeting.attackInfo && abilityTypes.indexOf(G.targeting.attackInfo.type) !== -1) {
       return doAbilityTarget(G, action.targetPlayer, action.targetBenchIdx);
     }
