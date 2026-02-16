@@ -152,8 +152,8 @@ register('stripEnergy', function(G, ctx, params) {
     }
   }
 
-  ctx.defender.energy = Math.max(0, ctx.defender.energy - (params[0] || 1));
-  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: params[0] || 1 });
+  ctx.defender.energy = Math.max(0, ctx.defender.energy - actual);
+  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual });
   return null;
 });
 
@@ -185,6 +185,13 @@ register('selfEnergyLoss', function(G, ctx, params) {
 
   ctx.attacker.energy = Math.max(0, ctx.attacker.energy - v);
   ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: v });
+  return null;
+});
+
+// --- Extra turn ---
+register('extraTurn', function(G, ctx, params) {
+  G.extraTurnFor = ctx.currentPlayer;
+  ctx.events.push({ type: 'extra_turn', player: ctx.currentPlayer, pokemon: ctx.attacker.name });
   return null;
 });
 
@@ -226,14 +233,9 @@ register('selfRetreat', function(G, ctx, params) {
 // --- Force opponent switch ---
 register('forceSwitch', function(G, ctx, params) {
   if (ctx.oppPlayer.bench.length > 0 && ctx.defender && ctx.defender.hp > 0) {
-    var newActive = ctx.oppPlayer.bench.shift();
-    if (ctx.oppPlayer.active.status.length > 0) {
-      ctx.events.push({ type: 'statusCured', pokemon: ctx.oppPlayer.active.name, reason: 'bench' });
-      ctx.oppPlayer.active.status = [];
-    }
-    ctx.oppPlayer.bench.push(ctx.oppPlayer.active);
-    ctx.oppPlayer.active = newActive;
-    ctx.events.push({ type: 'forceSwitch', oldActive: ctx.defender.name, newActive: newActive.name });
+    G.pendingRetreats.push({ player: ctx.oppPlayerNum, reason: 'forced', afterEndTurn: true });
+    ctx.events.push({ type: 'retreat_pending', player: ctx.oppPlayerNum, reason: 'forcedSwitch' });
+    return 'pendingRetreat';
   }
   return null;
 });
@@ -287,17 +289,28 @@ register('sniperBench', function(G, ctx, params) {
   return null;
 });
 
-// --- Self bench damage ---
+// --- Self bench damage (choose one of your bench Pokemon) ---
 register('selfBenchDmg', function(G, ctx, params) {
   _deps();
   var v = params[0] || 0;
-  if (ctx.myPlayer.bench.length > 0) {
-    var target = ctx.myPlayer.bench[0];
-    var sbAtk = { baseDmg: v, fx: '' };
-    var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, target, sbAtk, ctx.attackerTypes, ctx.currentPlayer);
-    ctx.events.push({ type: 'selfBenchDmg', pokemon: target.name, amount: v });
-    ctx.events = ctx.events.concat(result.events);
+  if (v <= 0) return null;
+  var validTargets = [];
+  ctx.myPlayer.bench.forEach(function(pk, bi) {
+    if (pk && pk.hp > 0) validTargets.push({ player: ctx.currentPlayer, idx: bi, pk: pk });
+  });
+
+  if (validTargets.length > 0) {
+    ctx.targetingInfo = {
+      type: 'selfBenchDmg',
+      validTargets: validTargets,
+      baseDmg: v,
+      attackerTypes: ctx.attackerTypes,
+      attacker: ctx.attacker,
+      attack: ctx.attack
+    };
+    return 'pendingTarget';
   }
+
   return null;
 });
 
@@ -323,6 +336,25 @@ register('healSelf', function(G, ctx, params) {
   ctx.attacker.damage = Math.max(0, ctx.attacker.damage - v);
   ctx.attacker.hp = ctx.attacker.maxHp - ctx.attacker.damage;
   ctx.events.push({ type: 'heal', pokemon: ctx.attacker.name, amount: v });
+  return null;
+});
+
+// --- Heal all allies ---
+register('healAll', function(G, ctx, params) {
+  var v = params[0] || 0;
+  if (v <= 0) return null;
+  var allies = [ctx.myPlayer.active].concat(ctx.myPlayer.bench).filter(Boolean);
+  allies.forEach(function(pk) {
+    if (pk.damage > 0) {
+      var before = pk.damage;
+      pk.damage = Math.max(0, pk.damage - v);
+      var healed = before - pk.damage;
+      if (healed > 0) {
+        pk.hp = pk.maxHp - pk.damage;
+        ctx.events.push({ type: 'heal', pokemon: pk.name, amount: healed, source: 'healAll' });
+      }
+    }
+  });
   return null;
 });
 
@@ -442,34 +474,65 @@ register('optBoost', function(G, ctx, params) {
   return null;
 });
 
-// --- Any strip (strip from any opp pokemon with energy) ---
+// --- Any strip (pick any opponent Pokemon with energy) ---
 register('anyStrip', function(G, ctx, params) {
   var v = params[0] || 1;
-  var oppAll = [ctx.oppPlayer.active].concat(ctx.oppPlayer.bench).filter(function(pk) {
-    return pk && pk.energy > 0 && pk.heldItem !== 'Protect Goggles';
-  });
-  if (oppAll.length > 0) {
-    var target = oppAll[0];
-    var actual = Math.min(v, target.energy);
-    target.energy = Math.max(0, target.energy - actual);
-    ctx.events.push({ type: 'energyStrip', pokemon: target.name, amount: actual, source: 'anyStrip' });
+  if (v <= 0) return null;
+  var validTargets = [];
+  if (ctx.oppPlayer.active && ctx.oppPlayer.active.energy > 0 && ctx.oppPlayer.active.heldItem !== 'Protect Goggles') {
+    validTargets.push({ player: ctx.oppPlayerNum, idx: -1, pk: ctx.oppPlayer.active });
   }
+  ctx.oppPlayer.bench.forEach(function(pk, bi) {
+    if (pk && pk.energy > 0 && pk.heldItem !== 'Protect Goggles') {
+      validTargets.push({ player: ctx.oppPlayerNum, idx: bi, pk: pk });
+    }
+  });
+
+  if (validTargets.length > 0) {
+    ctx.targetingInfo = {
+      type: 'anyStrip',
+      validTargets: validTargets,
+      amount: v,
+      attacker: ctx.attacker,
+      attackerTypes: ctx.attackerTypes,
+      attack: ctx.attack
+    };
+    return 'pendingTarget';
+  }
+
   return null;
 });
 
-// --- Multi-target ---
+// --- Multi-target (pick targets one-by-one) ---
 register('multiTarget', function(G, ctx, params) {
   _deps();
   var dmg = params[0] || 0;
   var count = params[1] || 1;
-  var targets = [ctx.oppPlayer.active].concat(ctx.oppPlayer.bench).filter(Boolean).slice(0, count);
-  var multiAtk = { baseDmg: dmg, fx: '' };
-  targets.forEach(function(target) {
-    var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, target, multiAtk, ctx.attackerTypes, ctx.oppPlayerNum);
-    ctx.events = ctx.events.concat(result.events);
+  if (dmg <= 0 || count <= 0) return null;
+
+  var validTargets = [];
+  if (ctx.oppPlayer.active && ctx.oppPlayer.active.hp > 0) {
+    validTargets.push({ player: ctx.oppPlayerNum, idx: -1, pk: ctx.oppPlayer.active });
+  }
+  ctx.oppPlayer.bench.forEach(function(pk, bi) {
+    if (pk && pk.hp > 0) validTargets.push({ player: ctx.oppPlayerNum, idx: bi, pk: pk });
   });
-  ctx.attacker.energy = Math.max(0, ctx.attacker.energy - 2);
-  ctx.events.push({ type: 'multiTarget', dmg: dmg, count: count });
+
+  if (validTargets.length > 0) {
+    ctx.attacker.energy = Math.max(0, ctx.attacker.energy - 2);
+    ctx.events.push({ type: 'multiTarget', dmg: dmg, count: count });
+    ctx.targetingInfo = {
+      type: 'multiTarget',
+      validTargets: validTargets,
+      baseDmg: dmg,
+      remaining: Math.min(count, validTargets.length),
+      attacker: ctx.attacker,
+      attackerTypes: ctx.attackerTypes,
+      attack: ctx.attack
+    };
+    return 'pendingTarget';
+  }
+
   return null;
 });
 
@@ -511,8 +574,36 @@ register('snipe', function(G, ctx, params) {
   return null;
 });
 
+// --- Bench energy target (choose one of your bench Pokémon) ---
+register('benchEnergy', function(G, ctx, params) {
+  _deps();
+  var amount = params[0] || 0;
+  if (amount <= 0) return null;
+
+  var validTargets = [];
+  ctx.myPlayer.bench.forEach(function(pk, bi) {
+    if (pk && pk.hp > 0 && pk.energy < Constants.MAX_ENERGY) {
+      validTargets.push({ player: ctx.currentPlayer, idx: bi, pk: pk });
+    }
+  });
+
+  if (validTargets.length > 0) {
+    ctx.targetingInfo = {
+      type: 'benchEnergy',
+      validTargets: validTargets,
+      amount: amount,
+      attacker: ctx.attacker,
+      attackerTypes: ctx.attackerTypes,
+      attack: ctx.attack
+    };
+    return 'pendingTarget';
+  }
+
+  return null;
+});
+
 // --- Pre-damage effects (processed before main damage) ---
-// selfEnergy, gainMana, benchEnergyAll, benchEnergy
+// selfEnergy, gainMana, benchEnergyAll
 // These are handled separately in processPreDamageEffects
 
 /**
@@ -554,14 +645,6 @@ function processPreDamageEffects(G, fx, attacker, currentPlayer) {
         events.push({ type: 'energyGain', pokemon: pk.name, amount: 1, source: 'benchEnergyAll', benchIdx: i });
       }
     });
-  }
-
-  if (fx.indexOf('benchEnergy:') !== -1) {
-    var target = p.bench.find(function(pk) { return pk.energy < Constants.MAX_ENERGY; });
-    if (target) {
-      target.energy++;
-      events.push({ type: 'energyGain', pokemon: target.name, amount: 1, source: 'benchEnergy', benchIdx: p.bench.indexOf(target) });
-    }
   }
 
   return events;
