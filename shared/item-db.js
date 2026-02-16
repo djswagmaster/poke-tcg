@@ -37,6 +37,16 @@ var ITEM_DB = [
     }
   },
 
+  {
+    name: "Eviolite", desc: "If holder cost <=3: -20 damage. Also grants +HP by cost (3:+10,2:+20,1:+30)", key: "eviolite",
+    hooks: {
+      onTakeDamage: function(ctx) {
+        if (ctx.holderCost && ctx.holderCost <= 3) return { reduction: 20 };
+        return null;
+      }
+    }
+  },
+
   // ---- Reactive (on being attacked) ----
   {
     name: "Burn Scarf", desc: "Attacked: 10 dmg + Burn", key: "burnScarf",
