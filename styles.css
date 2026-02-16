@@ -115,10 +115,10 @@ button { cursor:pointer; font-family:inherit; }
 /* Card selection & glow effects */
 .field-pokemon.selected-card .fp-img { border-color:#818cf8; box-shadow:0 0 12px rgba(129,140,248,0.5); }
 .field-pokemon.glow-attack .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.35); border-color:rgba(250,204,21,0.4); }
-.field-pokemon.glow-ability .fp-img { box-shadow:0 0 10px rgba(129,140,248,0.35); border-color:rgba(129,140,248,0.4); }
-.field-pokemon.glow-attack.glow-ability .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.3), 0 0 18px rgba(129,140,248,0.25); border-color:rgba(250,204,21,0.4); }
+.field-pokemon.glow-ability .fp-img { box-shadow:0 0 10px rgba(74,222,128,0.35); border-color:rgba(74,222,128,0.45); }
+.field-pokemon.glow-attack.glow-ability .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.3), 0 0 18px rgba(74,222,128,0.25); border-color:rgba(250,204,21,0.4); }
 .field-pokemon.selected-card.glow-attack .fp-img { box-shadow:0 0 14px rgba(250,204,21,0.5); border-color:#fde047; }
-.field-pokemon.selected-card.glow-ability .fp-img { box-shadow:0 0 14px rgba(129,140,248,0.5); border-color:#818cf8; }
+.field-pokemon.selected-card.glow-ability .fp-img { box-shadow:0 0 14px rgba(74,222,128,0.45); border-color:#4ade80; }
 @keyframes glowPulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
 .field-pokemon.glow-attack .fp-img, .field-pokemon.glow-ability .fp-img { animation:glowPulse 2s ease-in-out infinite; }
 

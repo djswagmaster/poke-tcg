@@ -304,10 +304,11 @@ function applyDamage(G, pokemon, amount, ownerPlayerNum) {
  * Process a KO — increment scorer's KOs, handle Rescue Scarf, check win, etc.
  * Returns events array.
  */
-function handleKO(G, pokemon, ownerPlayerNum) {
+function handleKO(G, pokemon, ownerPlayerNum, options) {
   _deps();
   var opp = Constants.opp;
   var events = [];
+  options = options || {};
   var owner = G.players[ownerPlayerNum];
   var scorerNum = opp(ownerPlayerNum);
   var scorer = G.players[scorerNum];
@@ -359,7 +360,11 @@ function handleKO(G, pokemon, ownerPlayerNum) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
-      G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
+      G.pendingRetreats.push({
+        player: ownerPlayerNum,
+        reason: 'ko',
+        endTurnAfterSwitch: options.endTurnAfterSwitch !== false
+      });
       events.push({ type: 'needNewActive', player: ownerPlayerNum, reason: 'ko' });
     } else {
       // No bench left — auto-lose

@@ -62,7 +62,7 @@ function makePokemon(name, heldItem) {
   var energy = heldItem === 'Power Herb' ? 1 : 0;
   var actualItem = heldItem === 'Power Herb' ? null : heldItem;
   return {
-    name: name, maxHp: maxHp, hp: maxHp, energy: energy,
+    name: name, baseMaxHp: maxHp, maxHp: maxHp, hp: maxHp, energy: energy,
     heldItem: actualItem, heldItemUsed: heldItem === 'Power Herb',
     status: [], damage: 0, shields: [], sustained: false,
     attackedThisTurn: false, cantUseAttack: null,
@@ -106,6 +106,35 @@ function runOnPlayAbility(G, playerNum, pk) {
   }
 }
 
+function applyBloomingGardenAura(G) {
+  _deps();
+  var passivesBlocked = isPassiveBlocked(G);
+  [1, 2].forEach(function(playerNum) {
+    var p = G.players[playerNum];
+    var inPlay = [p.active].concat(p.bench).filter(Boolean);
+    var bloomingCount = 0;
+    if (!passivesBlocked) {
+      inPlay.forEach(function(pk) {
+        var d = PokemonDB.getPokemonData(pk.name);
+        if (d && d.ability && d.ability.key === 'bloomingGarden') bloomingCount++;
+      });
+    }
+    var bonus = 20 * bloomingCount;
+    inPlay.forEach(function(pk) {
+      if (!pk.baseMaxHp) pk.baseMaxHp = pk.maxHp;
+      var targetMax = pk.baseMaxHp + bonus;
+      if (targetMax !== pk.maxHp) {
+        var delta = targetMax - pk.maxHp;
+        pk.maxHp = targetMax;
+        if (pk.hp > 0) {
+          pk.hp = Math.max(1, Math.min(pk.maxHp, pk.hp + delta));
+          pk.damage = Math.max(0, pk.maxHp - pk.hp);
+        }
+      }
+    });
+  });
+}
+
 // ============================================================
 // TURN MANAGEMENT
 // ============================================================
@@ -125,6 +154,7 @@ function startTurn(G) {
   // Clear Ditto improvise
   if (p.active) p.active.improviseActive = false;
   G.targeting = null;
+  applyBloomingGardenAura(G);
 
   // Clear shields / vulnerability / locked attacks
   var allPokemon = [p.active].concat(p.bench).filter(Boolean);
@@ -505,6 +535,127 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   var info = G.targeting.attackInfo;
   G.targeting = null;
 
+  // Targeted bench energy grant (e.g. Twinkly Generator)
+  if (info.type === 'benchEnergy') {
+    if (targetPlayer !== G.currentPlayer || targetBenchIdx < 0) return false;
+    var energyAmount = info.amount || 0;
+    if (energyAmount <= 0 || targetPk.energy >= Constants.MAX_ENERGY) return false;
+
+    var before = targetPk.energy;
+    targetPk.energy = Math.min(Constants.MAX_ENERGY, targetPk.energy + energyAmount);
+    var gained = targetPk.energy - before;
+    if (gained > 0) {
+      G.events.push({ type: 'energyGain', pokemon: targetPk.name, amount: gained, source: 'benchEnergy', benchIdx: targetBenchIdx });
+      addLog(G, info.attacker.name + ' granted ' + gained + ' energy to ' + targetPk.name, 'effect');
+    }
+
+    // Process remaining FX from the original attack, excluding benchEnergy
+    var benchFx = (info.attack && info.attack.fx) || '';
+    var benchRemainFx = benchFx.replace(/benchEnergy:\d+/, '').trim();
+    if (benchRemainFx) {
+      var benchFxResult = FXHandlers.processAll(G, benchRemainFx, info.attacker, targetPk, info.attack, false);
+      G.events = G.events.concat(benchFxResult.events);
+      if (benchFxResult.signal === 'pendingRetreat') return true;
+      if (benchFxResult.signal === 'pendingTarget') {
+        G.targeting = { type: benchFxResult.targetingInfo.type, validTargets: benchFxResult.targetingInfo.validTargets, attackInfo: benchFxResult.targetingInfo };
+        return true;
+      }
+    }
+
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
+
+  // Targeted self bench damage (e.g. Collateral Crush)
+  if (info.type === 'selfBenchDmg') {
+    if (targetPlayer !== G.currentPlayer || targetBenchIdx < 0) return false;
+    var selfBenchAtk = { baseDmg: info.baseDmg, fx: '' };
+    var selfBenchResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, selfBenchAtk, info.attackerTypes, targetPlayer, {
+      attackSeq: info.attackSeq
+    });
+    G.events.push({ type: 'selfBenchDmg', pokemon: targetPk.name, amount: info.baseDmg, benchIdx: targetBenchIdx });
+    G.events = G.events.concat(selfBenchResult.events);
+
+    var selfBenchFx = (info.attack && info.attack.fx) || '';
+    var selfBenchRemainFx = selfBenchFx.replace(/selfBenchDmg:\d+/, '').trim();
+    if (selfBenchRemainFx) {
+      var selfBenchFxResult = FXHandlers.processAll(G, selfBenchRemainFx, info.attacker, targetPk, info.attack, false);
+      G.events = G.events.concat(selfBenchFxResult.events);
+      if (selfBenchFxResult.signal === 'pendingRetreat') return true;
+      if (selfBenchFxResult.signal === 'pendingTarget') {
+        G.targeting = { type: selfBenchFxResult.targetingInfo.type, validTargets: selfBenchFxResult.targetingInfo.validTargets, attackInfo: selfBenchFxResult.targetingInfo };
+        return true;
+      }
+    }
+
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
+  // Targeted strip from any opposing Pokemon (e.g. Shadow Chase)
+  if (info.type === 'anyStrip') {
+    if (targetPlayer === G.currentPlayer) return false;
+    var stripAmount = info.amount || 0;
+    if (stripAmount <= 0) return false;
+    var actualStrip = Math.min(stripAmount, targetPk.energy);
+    targetPk.energy = Math.max(0, targetPk.energy - actualStrip);
+    G.events.push({ type: 'energyStrip', pokemon: targetPk.name, amount: actualStrip, source: 'anyStrip', targetOwner: targetPlayer });
+
+    var anyStripFx = (info.attack && info.attack.fx) || '';
+    var anyStripRemainFx = anyStripFx.replace(/anyStrip:\d+/, '').trim();
+    if (anyStripRemainFx) {
+      var anyStripFxResult = FXHandlers.processAll(G, anyStripRemainFx, info.attacker, targetPk, info.attack, false);
+      G.events = G.events.concat(anyStripFxResult.events);
+      if (anyStripFxResult.signal === 'pendingRetreat') return true;
+      if (anyStripFxResult.signal === 'pendingTarget') {
+        G.targeting = { type: anyStripFxResult.targetingInfo.type, validTargets: anyStripFxResult.targetingInfo.validTargets, attackInfo: anyStripFxResult.targetingInfo };
+        return true;
+      }
+    }
+
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
+  // Targeted multi-hit targeting (e.g. Split Sludge Bomb)
+  if (info.type === 'multiTarget') {
+    var multiAtk = { baseDmg: info.baseDmg, fx: '' };
+    var multiResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, multiAtk, info.attackerTypes, targetPlayer, {
+      attackSeq: info.attackSeq
+    });
+    G.events = G.events.concat(multiResult.events);
+
+    info.remaining = Math.max(0, (info.remaining || 0) - 1);
+    info.validTargets = info.validTargets.filter(function(t) {
+      return !(t.player === targetPlayer && t.idx === targetBenchIdx);
+    });
+
+    if (info.remaining > 0 && info.validTargets.length > 0) {
+      G.targeting = {
+        type: 'multiTarget',
+        validTargets: info.validTargets,
+        attackInfo: info
+      };
+      return true;
+    }
+
+    var multiFx = (info.attack && info.attack.fx) || '';
+    var multiRemainFx = multiFx.replace(/multiTarget:\d+:\d+/, '').trim();
+    if (multiRemainFx) {
+      var multiFxResult = FXHandlers.processAll(G, multiRemainFx, info.attacker, targetPk, info.attack, false);
+      G.events = G.events.concat(multiFxResult.events);
+      if (multiFxResult.signal === 'pendingRetreat') return true;
+      if (multiFxResult.signal === 'pendingTarget') {
+        G.targeting = { type: multiFxResult.targetingInfo.type, validTargets: multiFxResult.targetingInfo.validTargets, attackInfo: multiFxResult.targetingInfo };
+        return true;
+      }
+    }
+
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
   // Calculate damage on target
   var sniperAtk = { baseDmg: info.baseDmg, fx: '' };
   var result = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, sniperAtk, info.attackerTypes, targetPlayer, {
@@ -645,8 +796,10 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   // Resolve post-retreat flow
   if (duringEnd) {
     switchTurn(G);
-  } else if (reason === 'retreat' || reason === 'ko') {
+  } else if (reason === 'retreat') {
     endTurn(G);
+  } else if (reason === 'ko') {
+    if (pr.endTurnAfterSwitch !== false) endTurn(G);
   } else if (reason === 'quick') {
     if (afterEnd) endTurn(G);
   } else if (reason === 'forced' || reason === 'batonPass') {
@@ -727,7 +880,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
   var key = data.ability.key;
   var fromBench = !!(pk !== p.active);
-  if (fromBench && data.ability.desc && /\(active\)/i.test(data.ability.desc)) return false;
+  if (fromBench && (data.ability.activeOnly || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
 
   // Check already used (except unlimited ones)
   if (key !== 'magicDrain' && p.usedAbilities[key]) {
@@ -756,7 +909,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (healTargets.length > 0) {
         G.targeting = {
           type: 'softTouch', validTargets: healTargets,
-          attackInfo: { type: 'softTouch', attacker: pk }
+          attackInfo: { sourceType: 'ability', type: 'softTouch', attacker: pk }
         };
         G.events.push({ type: 'ability_targeting', ability: key });
       }
@@ -801,28 +954,26 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (htTargets.length > 0) {
         G.targeting = {
           type: 'healingTouch', validTargets: htTargets,
-          attackInfo: { type: 'healingTouch', attacker: pk }
+          attackInfo: { sourceType: 'ability', type: 'healingTouch', attacker: pk }
         };
       }
       p.usedAbilities[key] = true;
       G.events.push({ type: 'ability_effect', ability: key });
       break;
 
-    case 'yummyDelivery': // Slurpuff: bench +1 energy free
-      var benchTarget = p.bench.find(function(bpk) { return bpk.energy < Constants.MAX_ENERGY; });
-      if (!benchTarget) return false;
-      benchTarget.energy++;
+    case 'yummyDelivery': // Slurpuff: choose bench +1 energy free
+      var ydTargets = [];
+      p.bench.forEach(function(bpk, bi) {
+        if (bpk.energy < Constants.MAX_ENERGY) ydTargets.push({ player: G.currentPlayer, idx: bi, pk: bpk });
+      });
+      if (ydTargets.length === 0) return false;
       p.usedAbilities[key] = true;
-      addLog(G, 'Yummy Delivery: ' + benchTarget.name + ' +1 energy!', 'effect');
-      G.events.push({ type: 'ability_effect', ability: key, target: benchTarget.name });
-
-      // Healing Scarf on energy gain
-      if (benchTarget.heldItem === 'Healing Scarf' && benchTarget.damage > 0) {
-        benchTarget.damage = Math.max(0, benchTarget.damage - 20);
-        benchTarget.hp = benchTarget.maxHp - benchTarget.damage;
-        addLog(G, 'Healing Scarf heals ' + benchTarget.name + ' 20', 'heal');
-        G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: benchTarget.name, amount: 20 });
-      }
+      G.targeting = {
+        type: 'yummyDelivery',
+        validTargets: ydTargets,
+        attackInfo: { sourceType: 'ability', type: 'yummyDelivery', attacker: pk }
+      };
+      G.events.push({ type: 'ability_targeting', ability: key });
       break;
 
     case 'hiddenPower': // Unown: active +1 energy, turn ends
@@ -882,7 +1033,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (ccTargets.length > 0) {
         G.targeting = {
           type: 'creepingChill', validTargets: ccTargets,
-          attackInfo: { type: 'creepingChill', attacker: pk, baseDmg: 10 }
+          attackInfo: { sourceType: 'ability', type: 'creepingChill', attacker: pk, baseDmg: 10 }
         };
       }
       G.events.push({ type: 'ability_targeting', ability: key });
@@ -901,7 +1052,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       if (wsTargets.length === 0) return false;
       G.targeting = {
         type: 'waterShuriken', validTargets: wsTargets,
-        attackInfo: { type: 'waterShuriken', attacker: pk, baseDmg: 50 }
+        attackInfo: { sourceType: 'ability', type: 'waterShuriken', attacker: pk, baseDmg: 50 }
       };
       addLog(G, 'Water Shuriken primed: choose a target.', 'effect');
       G.events.push({ type: 'ability_targeting', ability: key });
@@ -932,6 +1083,22 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Bloodthirsty: opponent must switch!', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, target: opp(G.currentPlayer) });
+      break;
+
+    case 'electroCharge': // Jolteon: active +1 energy (1/turn)
+      if (pk !== p.active) return false;
+      if (pk.energy >= Constants.MAX_ENERGY) return false;
+      pk.energy++;
+      p.usedAbilities[key] = true;
+      addLog(G, 'Electro Charge: ' + pk.name + ' +1 energy!', 'effect');
+      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: 1 });
+
+      // Healing Scarf
+      if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
+        pk.damage = Math.max(0, pk.damage - 20);
+        pk.hp = pk.maxHp - pk.damage;
+        addLog(G, 'Healing Scarf heals ' + pk.name + ' 20', 'heal');
+      }
       break;
 
     case 'megaSpeed': // Mega Blaziken: +1 energy to self
@@ -1083,7 +1250,7 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       addLog(G, 'Creeping Chill: 10 to ' + targetPk.name, 'effect');
       G.events.push({ type: 'ability_damage', ability: 'creepingChill', target: targetPk.name, amount: 10, owner: targetPlayer });
       if (dmgResult.ko) {
-        var koEvents = DamagePipeline.handleKO(G, targetPk, targetPlayer);
+        var koEvents = DamagePipeline.handleKO(G, targetPk, targetPlayer, { endTurnAfterSwitch: false });
         G.events = G.events.concat(koEvents);
       }
       break;
@@ -1093,12 +1260,37 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       addLog(G, 'Water Shuriken: 50 to ' + targetPk.name, 'effect');
       G.events.push({ type: 'ability_damage', ability: 'waterShuriken', target: targetPk.name, amount: 50, owner: targetPlayer });
       if (shurikenResult.ko) {
-        var shurikenKo = DamagePipeline.handleKO(G, targetPk, targetPlayer);
+        var shurikenKo = DamagePipeline.handleKO(G, targetPk, targetPlayer, { endTurnAfterSwitch: false });
         G.events = G.events.concat(shurikenKo);
+      }
+      break;
+
+    case 'yummyDelivery':
+      if (targetPlayer !== G.currentPlayer || targetBenchIdx < 0) return false;
+      if (targetPk.energy >= Constants.MAX_ENERGY) return false;
+      targetPk.energy++;
+      addLog(G, 'Yummy Delivery: ' + targetPk.name + ' +1 energy!', 'effect');
+      G.events.push({ type: 'ability_effect', ability: 'yummyDelivery', target: targetPk.name, amount: 1, benchIdx: targetBenchIdx });
+
+      // Healing Scarf on energy gain
+      if (targetPk.heldItem === 'Healing Scarf' && targetPk.damage > 0) {
+        targetPk.damage = Math.max(0, targetPk.damage - 20);
+        targetPk.hp = targetPk.maxHp - targetPk.damage;
+        addLog(G, 'Healing Scarf heals ' + targetPk.name + ' 20', 'heal');
+        G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: targetPk.name, amount: 20 });
       }
       break;
   }
 
+  return true;
+}
+
+// --- Cancel targeting (safety valve) ---
+function doCancelTargeting(G) {
+  if (!G.targeting) return false;
+  G.targeting = null;
+  addLog(G, 'Target selection cancelled.', 'info');
+  G.events.push({ type: 'ability_targeting', cancelled: true });
   return true;
 }
 
@@ -1245,43 +1437,48 @@ function processSetupChoice(G, playerNum, choices) {
 // MAIN ACTION PROCESSOR
 // ============================================================
 function processAction(G, playerNum, action) {
-  if (G.winner) return false;
+  function finish(result) {
+    applyBloomingGardenAura(G);
+    return result;
+  }
+
+  if (G.winner) return finish(false);
   G.events = [];
 
   // Bench selection for retreat (can be non-current player for KO)
   if (action.type === 'selectBenchForRetreat') {
-    return doSelectBenchForRetreat(G, action.benchIdx, playerNum);
+    return finish(doSelectBenchForRetreat(G, action.benchIdx, playerNum));
   }
 
   // Target selection (ability targets + attack targets)
   if (action.type === 'selectTarget') {
-    if (!G.targeting) return false;
+    if (!G.targeting) return finish(false);
     // Ability targets
-    var abilityTypes = ['softTouch', 'healingTouch', 'creepingChill', 'waterShuriken'];
-    if (G.targeting.attackInfo && abilityTypes.indexOf(G.targeting.attackInfo.type) !== -1) {
-      return doAbilityTarget(G, action.targetPlayer, action.targetBenchIdx);
+    if (G.targeting.attackInfo && G.targeting.attackInfo.sourceType === 'ability') {
+      return finish(doAbilityTarget(G, action.targetPlayer, action.targetBenchIdx));
     }
-    // Attack targets (snipe, sniperBench, swarmSnipe)
-    if (G.currentPlayer !== playerNum) return false;
-    return doSelectTarget(G, action.targetPlayer, action.targetBenchIdx);
+    // Attack targets (snipe, sniperBench, swarmSnipe, selfBenchDmg, anyStrip, multiTarget, benchEnergy)
+    if (G.currentPlayer !== playerNum) return finish(false);
+    return finish(doSelectTarget(G, action.targetPlayer, action.targetBenchIdx));
   }
 
   // All other actions require being current player in battle phase
-  if (G.phase !== 'battle') return false;
-  if (G.currentPlayer !== playerNum) return false;
-  if (G.pendingRetreats.length > 0 || G.targeting) return false;
+  if (G.phase !== 'battle') return finish(false);
+  if (G.currentPlayer !== playerNum) return finish(false);
+  if (G.pendingRetreats.length > 0 || G.targeting) return finish(false);
 
   switch (action.type) {
-    case 'attack': return doAttack(G, action.attackIndex, action);
-    case 'copiedAttack': return doCopiedAttack(G, action.sourceName, action.attackIndex, action);
-    case 'retreat': return doRetreat(G);
-    case 'quickRetreat': return doQuickRetreat(G);
-    case 'grantEnergy': return doGrantEnergy(G, action.targetSlot, action.benchIdx);
-    case 'playPokemon': return doPlayPokemon(G, action.handIdx, action.itemHandIdx);
-    case 'useAbility': return doUseAbility(G, action.key, action.sourceBenchIdx);
-    case 'discardItem': return doDiscardItem(G, action.slot, action.benchIdx);
-    case 'endTurn': return doEndTurnAction(G);
-    default: return false;
+    case 'attack': return finish(doAttack(G, action.attackIndex, action));
+    case 'copiedAttack': return finish(doCopiedAttack(G, action.sourceName, action.attackIndex, action));
+    case 'retreat': return finish(doRetreat(G));
+    case 'quickRetreat': return finish(doQuickRetreat(G));
+    case 'grantEnergy': return finish(doGrantEnergy(G, action.targetSlot, action.benchIdx));
+    case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx));
+    case 'useAbility': return finish(doUseAbility(G, action.key, action.sourceBenchIdx));
+    case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx));
+    case 'cancelTargeting': return finish(doCancelTargeting(G));
+    case 'endTurn': return finish(doEndTurnAction(G));
+    default: return finish(false);
   }
 }
 

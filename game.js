@@ -558,6 +558,16 @@ function selectTarget(playerNum, benchIdx) {
   dispatchAction({ type: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx });
 }
 
+function cancelTargetingAction() {
+  if (!G.targeting) return;
+  if (isOnline) {
+    if (!isMyTurn()) return;
+    sendAction({ actionType: 'cancelTargeting' });
+    return;
+  }
+  dispatchAction({ type: 'cancelTargeting' });
+}
+
 async function actionCopiedAttack(copiedIdx, forceOptBoost = null) {
   if (G.animating) return;
   const copied = copiedAttacks[copiedIdx];
@@ -622,6 +632,26 @@ function useAbility(key) {
     : -1;
   if (isOnline) { sendAction({ actionType: 'useAbility', key, sourceBenchIdx }); return; }
   dispatchAction({ type: 'useAbility', key, sourceBenchIdx });
+}
+
+
+function getAbilityMetaByKey(key) {
+  if (!key) return null;
+  for (const c of POKEMON_DB) {
+    if (c.ability && c.ability.key === key) return c.ability;
+  }
+  return null;
+}
+
+function abilityRequiresActivePosition(key) {
+  const ability = getAbilityMetaByKey(key);
+  return !!(ability && ability.activeOnly);
+}
+
+function canUseAbilityFromSelection(abilityKey, used, benchIdx) {
+  const notSpent = !used || abilityKey === 'healingTouch' || abilityKey === 'magicDrain';
+  const positionOk = !abilityRequiresActivePosition(abilityKey) || benchIdx === -1;
+  return notSpent && positionOk;
 }
 
 
@@ -1100,7 +1130,7 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
     imgClass = 'clickable';
   }
 
-  // Determine glow: yellow for active that can attack, blue for usable ability
+  // Determine glow: yellow for active that can attack, green for usable ability
   const isMine = playerNum === meNum();
   const isMyTurnNow = isOnline ? isMyTurn() : true;
   let glowClass = '';
@@ -1111,10 +1141,10 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
     if (benchIdx === -1 && data.attacks && data.attacks.some(atk => pk.energy >= atk.energy && !pk.status.includes('sleep'))) {
       glowClass = 'glow-attack';
     }
-    // Blue glow: has usable active ability
+    // Green glow: has usable active ability
     if (data.ability && data.ability.type === 'active') {
       const used = me.usedAbilities[data.ability.key];
-      const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+      const canUse = canUseAbilityFromSelection(data.ability.key, used, benchIdx);
       if (canUse) glowClass += (glowClass ? ' ' : '') + 'glow-ability';
     }
   }
@@ -1149,7 +1179,8 @@ function renderActionPanel() {
   const retreatOwner = G.pendingRetreats.length > 0 ? G.pendingRetreats[0].player : null;
   const myPendingRetreat = retreatOwner !== null && (isOnline ? retreatOwner === myPlayerNum : true);
   const oppPendingRetreat = isOnline && retreatOwner !== null && retreatOwner !== myPlayerNum;
-  if (isOnline && ((!isMyTurn() && !myPendingRetreat) || oppPendingRetreat)) {
+  const hasActionableTargeting = !!(G.targeting && G.targeting.validTargets && G.targeting.validTargets.length > 0);
+  if (isOnline && !hasActionableTargeting && ((!isMyTurn() && !myPendingRetreat) || oppPendingRetreat)) {
     info.innerHTML = '';
     panel.innerHTML = '<div style="color:#888;padding:20px;text-align:center">Waiting for opponent...</div>';
     return;
@@ -1159,7 +1190,11 @@ function renderActionPanel() {
   // Targeting mode - override everything
   if (G.targeting) {
     info.innerHTML = '';
-    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET <button onclick="G.targeting=null;G.animating=false;renderBattle()" style="margin-left:8px;padding:2px 10px;border:none;border-radius:6px;background:rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:10px">Cancel</button></div>`;
+    const canCancelTargeting = !isOnline || isMyTurn();
+    const cancelBtn = canCancelTargeting
+      ? `<button onclick="cancelTargetingAction()" style="margin-left:8px;padding:2px 10px;border:none;border-radius:6px;background:rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:10px">Cancel</button>`
+      : '';
+    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET ${cancelBtn}</div>`;
     return;
   }
 
@@ -1313,7 +1348,7 @@ function renderActionPanel() {
     if (data.ability) {
       if (data.ability.type === 'active') {
         const used = me.usedAbilities[data.ability.key];
-        const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+        const canUse = canUseAbilityFromSelection(data.ability.key, used, -1);
         html += '<div class="ap-section-label">ABILITY</div>';
         html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
           <span class="atk-name">${data.ability.name}</span>
@@ -1376,7 +1411,7 @@ function renderActionPanel() {
     // Ability (if this bench pokemon has an active ability)
     if (data.ability && data.ability.type === 'active' && data.ability.key !== 'improvise') {
       const used = me.usedAbilities[data.ability.key];
-      const canUse = !used || data.ability.key === 'healingTouch' || data.ability.key === 'magicDrain';
+      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel);
       html += '<div class="ap-section-label">ABILITY</div>';
       html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
         <span class="atk-name">${data.ability.name}</span>
