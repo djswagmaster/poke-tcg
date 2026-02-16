@@ -52,7 +52,13 @@ function isPassiveBlocked(G) {
 function makePokemon(name, heldItem) {
   _deps();
   var data = PokemonDB.getPokemonData(name);
-  var maxHp = data.hp + (heldItem === 'Health Charm' ? 50 : 0);
+  var evioliteBonus = 0;
+  if (heldItem === 'Eviolite') {
+    if (data.cost === 1) evioliteBonus = 30;
+    else if (data.cost === 2) evioliteBonus = 20;
+    else if (data.cost === 3) evioliteBonus = 10;
+  }
+  var maxHp = data.hp + (heldItem === 'Health Charm' ? 50 : 0) + evioliteBonus;
   var energy = heldItem === 'Power Herb' ? 1 : 0;
   var actualItem = heldItem === 'Power Herb' ? null : heldItem;
   return {
@@ -592,6 +598,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   if (pr.player !== playerNum) return false;
 
   var p = G.players[pr.player];
+  var oldActiveName = p.active ? p.active.name : null;
   var newActive = p.bench[benchIdx];
   if (!newActive) return false;
 
@@ -607,7 +614,14 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   }
   p.active = newActive;
   addLog(G, newActive.name + ' is now Active!', 'info');
-  G.events.push({ type: 'switch_active', player: pr.player, newActive: newActive.name, reason: pr.reason });
+  G.events.push({
+    type: 'switch_active',
+    player: pr.player,
+    newActive: newActive.name,
+    oldActive: oldActiveName,
+    benchIdx: benchIdx,
+    reason: pr.reason
+  });
 
   var reason = pr.reason;
   var afterEnd = pr.afterEndTurn;
@@ -693,16 +707,27 @@ function doPlayPokemon(G, handIdx, itemHandIdx) {
 }
 
 // --- Use Active Ability ---
-function doUseAbility(G, abilityKey) {
+function doUseAbility(G, abilityKey, sourceBenchIdx) {
   _deps();
   var p = cp(G);
   var pk = p.active;
+  if (typeof sourceBenchIdx === 'number') {
+    if (sourceBenchIdx === -1) pk = p.active;
+    else pk = p.bench[sourceBenchIdx] || null;
+  } else if (G.selectedCard && G.selectedCard.playerNum === G.currentPlayer) {
+    var selectedIdx = G.selectedCard.benchIdx;
+    if (selectedIdx === -1) pk = p.active;
+    else pk = p.bench[selectedIdx] || null;
+  }
   if (!pk) return false;
   var data = PokemonDB.getPokemonData(pk.name);
   if (!data.ability || data.ability.type !== 'active') return false;
+  if (abilityKey && data.ability.key !== abilityKey) return false;
   if (isPassiveBlocked(G)) { addLog(G, 'Neutralizing Gas blocks abilities!', 'info'); return false; }
 
   var key = data.ability.key;
+  var fromBench = !!(pk !== p.active);
+  if (fromBench && data.ability.desc && /\(active\)/i.test(data.ability.desc)) return false;
 
   // Check already used (except unlimited ones)
   if (key !== 'magicDrain' && p.usedAbilities[key]) {
@@ -815,6 +840,19 @@ function doUseAbility(G, abilityKey) {
       }
 
       // End turn immediately
+      endTurn(G);
+      break;
+
+    case 'gutsyGenerator': // Tyrogue: if damaged, gain 1 mana then end turn
+      if (pk.damage <= 0) return false;
+      var prevMana = p.mana;
+      p.mana = Math.min(Constants.MAX_MANA, p.mana + 1);
+      var manaGain = p.mana - prevMana;
+      if (manaGain <= 0) return false;
+      p.usedAbilities[key] = true;
+      addLog(G, 'Gutsy Generator: +' + manaGain + ' mana. Turn ends.', 'effect');
+      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: manaGain });
+      G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: manaGain });
       endTurn(G);
       break;
 
@@ -1211,7 +1249,7 @@ function processAction(G, playerNum, action) {
     case 'quickRetreat': return doQuickRetreat(G);
     case 'grantEnergy': return doGrantEnergy(G, action.targetSlot, action.benchIdx);
     case 'playPokemon': return doPlayPokemon(G, action.handIdx, action.itemHandIdx);
-    case 'useAbility': return doUseAbility(G, action.key);
+    case 'useAbility': return doUseAbility(G, action.key, action.sourceBenchIdx);
     case 'discardItem': return doDiscardItem(G, action.slot, action.benchIdx);
     case 'endTurn': return doEndTurnAction(G);
     default: return false;

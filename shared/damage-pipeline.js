@@ -165,7 +165,10 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
     // Item-based reduction (hooks: onTakeDamage)
     if (defender.heldItem) {
-      var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, { holder: defender });
+      var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, {
+        holder: defender,
+        holderCost: PokemonDB.getPokemonData(defender.name).cost
+      });
       if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
     }
 
@@ -330,6 +333,18 @@ function handleKO(G, pokemon, ownerPlayerNum) {
     if (koResult && koResult.returnToHand) {
       owner.hand.push({ name: pokemon.name, type: 'pokemon', heldItem: null });
       events.push({ type: 'itemProc', item: 'Rescue Scarf', pokemon: pokemon.name, effect: 'returnToHand' });
+    }
+  }
+
+  // Azurill: Bouncy Generator (active KO grants 1 mana)
+  var ownerActiveData = PokemonDB.getPokemonData(pokemon.name);
+  if (owner.active === pokemon && ownerActiveData.ability && ownerActiveData.ability.key === 'bouncyGenerator' && !isPassiveBlocked(G)) {
+    var prevMana = owner.mana;
+    owner.mana = Math.min(Constants.MAX_MANA, owner.mana + 1);
+    var gained = owner.mana - prevMana;
+    if (gained > 0) {
+      events.push({ type: 'ability_effect', ability: 'bouncyGenerator', pokemon: pokemon.name, player: ownerPlayerNum, amount: gained });
+      events.push({ type: 'mana_gain', player: ownerPlayerNum, amount: gained });
     }
   }
 

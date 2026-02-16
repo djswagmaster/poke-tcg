@@ -261,6 +261,18 @@ var POKEMON_DB = [
     attacks:[{name:"Magical Gift",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"},
              {name:"Hyper Voice",energy:3,baseDmg:90,desc:"",fx:""}]},
 
+
+  {name:"Tyrogue",types:["Fighting"],cost:1,hp:100,weakness:["Flying"],resistance:["Rock"],
+    ability:{name:"Gutsy Generator",desc:"If this Pokemon has any damage on it, gain 1 mana. If you do, your turn ends.",type:"active",key:"gutsyGenerator"},
+    attacks:[{name:"Crash Kick",energy:2,baseDmg:40,desc:"This Pokemon also does 20 damage to itself",fx:"selfDmg:20"}]},
+
+  {name:"Cleffa",types:["Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Water"],
+    attacks:[{name:"Twinkly Generator",energy:1,baseDmg:0,desc:"Grant 1 of your Benched Pokemon +1 energy",fx:"benchEnergy:1"}]},
+
+  {name:"Azurill",types:["Water","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Normal","Water"],
+    ability:{name:"Bouncy Generator",desc:"If this is your Active Pokemon and is Knocked Out, gain 1 mana.",type:"passive",key:"bouncyGenerator"},
+    attacks:[{name:"Squish",energy:2,baseDmg:10,desc:"Heal 10 damage from this Pokemon",fx:"healSelf:10"}]},
+
   {name:"Trevenant",types:["Grass","Ghost"],cost:4,hp:230,weakness:["Dark","Poison"],resistance:["Normal","Water"],
     attacks:[{name:"Forest's Curse",energy:1,baseDmg:30,desc:"All opp Grass-weak",fx:"grassWeakness"},
              {name:"Wood Hammer",energy:3,baseDmg:120,desc:"Lose 1 energy",fx:"selfEnergyLoss:1"}]},

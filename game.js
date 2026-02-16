@@ -612,8 +612,11 @@ function finishPlayPokemon(handIdx, itemHandIdx) {
 
 function useAbility(key) {
   if (G.animating) return;
-  if (isOnline) { sendAction({ actionType: 'useAbility', key }); return; }
-  dispatchAction({ type: 'useAbility', key });
+  const sourceBenchIdx = (G.selectedCard && G.selectedCard.playerNum === meNum())
+    ? G.selectedCard.benchIdx
+    : -1;
+  if (isOnline) { sendAction({ actionType: 'useAbility', key, sourceBenchIdx }); return; }
+  dispatchAction({ type: 'useAbility', key, sourceBenchIdx });
 }
 
 
@@ -1895,6 +1898,15 @@ async function replayEvents(events) {
         const actSel = event.player ? getPokemonSelector(event.player, -1) : '#youField .active-slot';
         animateEl(actSel, 'slide-out', 320);
         await delay(320);
+        if (event.player) {
+          const swOwner = G.players[event.player];
+          const fromBenchIdx = event.benchIdx != null ? event.benchIdx : null;
+          if (swOwner && fromBenchIdx != null && swOwner.bench[fromBenchIdx]) {
+            const incoming = swOwner.bench.splice(fromBenchIdx, 1)[0];
+            if (swOwner.active && swOwner.active.hp > 0) swOwner.bench.push(swOwner.active);
+            swOwner.active = incoming;
+          }
+        }
         renderBattle();
         animateEl(actSel, 'slide-in', 320);
         await delay(320);
