@@ -211,7 +211,9 @@ var AnimQueue = (function() {
         // Progressively apply status to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.status) {
           var saPk = _findPokemonObj(evt.pokemon);
-          if (saPk) saPk.status = evt.status;
+          if (saPk && saPk.status) {
+            if (saPk.status.indexOf(evt.status) === -1) saPk.status.push(evt.status);
+          }
         }
         ctx.renderBattle();
         await ctx.delay(500);
@@ -225,7 +227,13 @@ var AnimQueue = (function() {
         // Progressively clear status from snapshot state
         if (typeof window !== 'undefined' && window.G && evt.pokemon) {
           var scPk = _findPokemonObj(evt.pokemon);
-          if (scPk) scPk.status = null;
+          if (scPk && scPk.status) {
+            if (evt.status) {
+              scPk.status = scPk.status.filter(function(s) { return s !== evt.status; });
+            } else {
+              scPk.status = [];
+            }
+          }
         }
         ctx.renderBattle();
         await ctx.delay(400);

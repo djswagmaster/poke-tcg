@@ -46,6 +46,30 @@ function isPassiveBlocked(G) {
   return DamagePipeline.isPassiveBlocked(G);
 }
 
+// Healing Scarf: heal 20 whenever a Pokemon gains energy
+function triggerHealingScarf(G, pk, healAmount) {
+  if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
+    var amt = healAmount || 20;
+    pk.damage = Math.max(0, pk.damage - amt);
+    pk.hp = pk.maxHp - pk.damage;
+    addLog(G, 'Healing Scarf heals ' + pk.name + ' ' + amt, 'heal');
+    G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: pk.name, amount: amt });
+  }
+}
+
+// Blockade: opponent's ability prevents retreat (unless holder has Protect Goggles)
+function isBlockedByBlockade(G, retreater) {
+  var oppActive = G.players[opp(G.currentPlayer)].active;
+  if (oppActive && !isPassiveBlocked(G)) {
+    var oppData = PokemonDB.getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'blockade' && retreater.heldItem !== 'Protect Goggles') {
+      addLog(G, 'Blockade prevents retreat!', 'effect');
+      return true;
+    }
+  }
+  return false;
+}
+
 // ============================================================
 // POKEMON FACTORY
 // ============================================================
@@ -331,13 +355,7 @@ function doGrantEnergy(G, targetSlot, benchIdx) {
   G.events.push({ type: 'energy_gain', pokemon: target.name, amount: 1, cost: cost, slot: targetSlot, benchIdx: benchIdx });
   addLog(G, 'Granted ' + target.name + ' +1 energy (' + cost + ' mana)', '');
 
-  // Healing Scarf
-  if (target.heldItem === 'Healing Scarf' && target.damage > 0) {
-    target.damage = Math.max(0, target.damage - 20);
-    target.hp = target.maxHp - target.damage;
-    addLog(G, 'Healing Scarf heals ' + target.name + ' 20', 'heal');
-    G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: target.name, amount: 20 });
-  }
+  triggerHealingScarf(G, target);
 
   // Biting Whirlpool (opponent's Arctozolt)
   var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
@@ -712,15 +730,7 @@ function doRetreat(G) {
     return false;
   }
 
-  // Blockade check
-  var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
-    var oppData = PokemonDB.getPokemonData(oppActive.name);
-    if (oppData.ability && oppData.ability.key === 'blockade' && p.active.heldItem !== 'Protect Goggles') {
-      addLog(G, 'Blockade prevents retreat!', 'effect');
-      return false;
-    }
-  }
+  if (isBlockedByBlockade(G, p.active)) return false;
 
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'retreat' });
   G.events.push({ type: 'retreat_pending', player: G.currentPlayer });
@@ -743,15 +753,7 @@ function doQuickRetreat(G) {
   }
   if (p.active.energy < cost) return false;
 
-  // Blockade check
-  var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
-    var oppData = PokemonDB.getPokemonData(oppActive.name);
-    if (oppData.ability && oppData.ability.key === 'blockade' && p.active.heldItem !== 'Protect Goggles') {
-      addLog(G, 'Blockade prevents retreat!', 'effect');
-      return false;
-    }
-  }
+  if (isBlockedByBlockade(G, p.active)) return false;
 
   p.active.energy -= cost;
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
@@ -1060,13 +1062,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Ancient Energy: +1 energy to ' + p.active.name, 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: p.active.name });
-
-      // Healing Scarf
-      if (p.active.heldItem === 'Healing Scarf' && p.active.damage > 0) {
-        p.active.damage = Math.max(0, p.active.damage - 20);
-        p.active.hp = p.active.maxHp - p.active.damage;
-        addLog(G, 'Healing Scarf heals ' + p.active.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, p.active);
 
       // End turn immediately
       endTurn(G);
@@ -1138,15 +1134,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
     case 'phantomWalk': // Zorua: free retreat (active only)
       if (p.bench.length === 0) return false;
-      // Same blockade check but free
-      var oppAct = op(G).active;
-      if (oppAct && !isPassiveBlocked(G)) {
-        var oppD = PokemonDB.getPokemonData(oppAct.name);
-        if (oppD.ability && oppD.ability.key === 'blockade' && pk.heldItem !== 'Protect Goggles') {
-          addLog(G, 'Blockade prevents retreat!', 'effect');
-          return false;
-        }
-      }
+      if (isBlockedByBlockade(G, pk)) return false;
       G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
       p.usedAbilities[key] = true;
       addLog(G, 'Illusory Getaway! Free retreat', 'effect');
@@ -1170,13 +1158,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Electro Charge: ' + pk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: 1 });
-
-      // Healing Scarf
-      if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
-        pk.damage = Math.max(0, pk.damage - 20);
-        pk.hp = pk.maxHp - pk.damage;
-        addLog(G, 'Healing Scarf heals ' + pk.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, pk);
       break;
 
     case 'megaSpeed': // Mega Blaziken: +1 energy to self
@@ -1185,13 +1167,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Mega Speed: ' + pk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name });
-
-      // Healing Scarf
-      if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
-        pk.damage = Math.max(0, pk.damage - 20);
-        pk.hp = pk.maxHp - pk.damage;
-        addLog(G, 'Healing Scarf heals ' + pk.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, pk);
       break;
 
     case 'magicDrain': // Mismagius: spend 1 mana, opp loses 1 (unlimited)
@@ -1349,14 +1325,7 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       targetPk.energy++;
       addLog(G, 'Yummy Delivery: ' + targetPk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: 'yummyDelivery', target: targetPk.name, amount: 1, benchIdx: targetBenchIdx });
-
-      // Healing Scarf on energy gain
-      if (targetPk.heldItem === 'Healing Scarf' && targetPk.damage > 0) {
-        targetPk.damage = Math.max(0, targetPk.damage - 20);
-        targetPk.hp = targetPk.maxHp - targetPk.damage;
-        addLog(G, 'Healing Scarf heals ' + targetPk.name + ' 20', 'heal');
-        G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: targetPk.name, amount: 20 });
-      }
+      triggerHealingScarf(G, targetPk);
       break;
 
     case 'leafBoost':

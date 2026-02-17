@@ -649,7 +649,7 @@ function abilityRequiresActivePosition(key) {
 }
 
 function canUseAbilityFromSelection(abilityKey, used, benchIdx) {
-  const notSpent = !used || abilityKey === 'healingTouch' || abilityKey === 'magicDrain';
+  const notSpent = !used || abilityKey === 'bubbleCleanse' || abilityKey === 'magicDrain';
   const positionOk = !abilityRequiresActivePosition(abilityKey) || benchIdx === -1;
   return notSpent && positionOk;
 }
@@ -1411,7 +1411,7 @@ function renderActionPanel() {
     // Ability (if this bench pokemon has an active ability)
     if (data.ability && data.ability.type === 'active' && data.ability.key !== 'improvise') {
       const used = me.usedAbilities[data.ability.key];
-      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel);
+      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel.benchIdx);
       html += '<div class="ap-section-label">ABILITY</div>';
       html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
         <span class="atk-name">${data.ability.name}</span>
@@ -1749,10 +1749,12 @@ function handleGameState(state, events) {
     if (events.length > 0) {
       // Defer full state update until after event replay so animations
       // (like ko-fall) can render against the pre-event DOM state.
-      // Only update log so new log entries appear during replay.
       G.log = state.log || [];
-      replayEvents(events).then(() => {
+      G.animating = true;
+      AnimQueue.replayEvents(events, animCtx);
+      AnimQueue.setOnDrain(() => {
         applyServerState(state);
+        G.animating = false;
         renderBattle();
         if (G.winner) showWin(G.winner);
       });
@@ -1770,341 +1772,8 @@ function handleGameState(state, events) {
 // EVENT REPLAY
 // ============================================================
 async function replayEvents(events) {
-  isReplayingEvents = true;
-  renderBattle(); // Render initial state
-
-  for (const event of events) {
-    // Helper: find a pokemon's selector from event fields.
-    // Events now use shared game-logic format: targetOwner/benchIdx/pokemon (name string).
-    const evtSel = (pNum, bIdx) => pNum != null ? getPokemonSelector(pNum, bIdx != null ? bIdx : -1) : null;
-    const findSel = (name) => name ? findPokemonSelector(name) : null;
-
-    switch (event.type) {
-      case 'attack_declare': {
-        const atkSel = getPokemonSelector(event.player || G.currentPlayer, -1);
-        animateEl(atkSel, 'attacking', 400);
-        await delay(400);
-        break;
-      }
-      case 'damage': {
-        captureHpState(); _hpPreCaptured = true; // Snapshot HP BEFORE applying damage so animateHpBars sees the delta
-        const dmgSel = evtSel(event.targetOwner, event.benchIdx);
-        showDamagePopup(event.amount, event.mult, dmgSel);
-        animateEl(dmgSel, getShakeClass(event.amount), getShakeDuration(event.amount));
-        const attackColor = (TYPE_PARTICLE_COLORS && event.attackerType) ? (TYPE_PARTICLE_COLORS[event.attackerType] || '#ef4444') : '#ef4444';
-        spawnParticlesAtEl(dmgSel, attackColor, event.amount >= 100 ? 22 : 14, {spread: event.amount >= 100 ? 75 : 55});
-        // Apply damage to local state so HP bars update during replay
-        if (event.targetOwner) {
-          const dmgOwner = G.players[event.targetOwner];
-          const bIdx = event.benchIdx != null ? event.benchIdx : -1;
-          const dmgTarget = bIdx === -1 ? dmgOwner.active : dmgOwner.bench[bIdx];
-          if (dmgTarget) {
-            dmgTarget.damage = (dmgTarget.damage || 0) + event.amount;
-            dmgTarget.hp = Math.max(0, dmgTarget.maxHp - dmgTarget.damage);
-          }
-        }
-        renderBattle();
-        await delay(event.amount >= 100 ? 1200 : event.amount >= 50 ? 900 : 700);
-        break;
-      }
-      case 'selfDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const selfSel = findSel(event.pokemon);
-        if (selfSel) {
-          showDamagePopupAt(event.amount, selfSel, false);
-          animateEl(selfSel, 'hit-shake', 500);
-        }
-        // Apply self-damage to local state
-        if (event.pokemon) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.pokemon) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'ko': {
-        const koSel = evtSel(event.owner, -1);
-        animateEl(koSel, 'ko-fall', 600);
-        spawnParticlesAtEl(koSel, '#ef4444', 20, {spread:70, size:4});
-        await delay(600);
-        // Remove the KO'd pokemon from local state so re-render shows it gone
-        if (event.owner) {
-          const koOwner = G.players[event.owner];
-          // Find by name since we don't have targetIdx anymore
-          if (koOwner.active && koOwner.active.name === event.pokemon) {
-            koOwner.active = null;
-          } else {
-            const koBIdx = koOwner.bench.findIndex(p => p.name === event.pokemon);
-            if (koBIdx >= 0) koOwner.bench.splice(koBIdx, 1);
-          }
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'statusApplied': {
-        const statSel = findSel(event.pokemon);
-        const statusColors = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
-        if (statSel) {
-          animateEl(statSel, 'status-apply', 500);
-          spawnParticlesAtEl(statSel, statusColors[event.status] || '#fff', 10, {spread:40});
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'status_cure': {
-        const cureSel = findSel(event.pokemon);
-        if (cureSel) animateEl(cureSel, 'status-cure', 500);
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'statusDamage':
-      case 'status_tick': {
-        captureHpState(); _hpPreCaptured = true;
-        const tickOwnerNum = event.owner || event.targetOwner;
-        const tickSel = evtSel(tickOwnerNum, -1);
-        const tickColors = { poison: '#A33EA1', burn: '#EE8130' };
-        spawnParticlesAtEl(tickSel, tickColors[event.status] || '#fff', 10, {spread:40, size:5});
-        animateEl(tickSel, 'status-apply', 500);
-        const tickDmg = event.damage || event.amount;
-        if (tickDmg && tickOwnerNum) {
-          const tickOwner = G.players[tickOwnerNum];
-          const tickTarget = tickOwner.active; // status damage always on active
-          if (tickTarget) {
-            tickTarget.damage = (tickTarget.damage || 0) + tickDmg;
-            tickTarget.hp = Math.max(0, tickTarget.maxHp - tickTarget.damage);
-          }
-        }
-        renderBattle();
-        await delay(600);
-        break;
-      }
-      case 'heal':
-      case 'ability_heal':
-      case 'item_heal': {
-        captureHpState(); _hpPreCaptured = true;
-        const healName = event.target || event.pokemon;
-        const healSel = findSel(healName);
-        if (healSel) {
-          animateEl(healSel, 'heal-pulse', 500);
-          spawnParticlesAtEl(healSel, '#4ade80', 8, {spread:30});
-          showDamagePopupAt(event.amount, healSel, true);
-        }
-        // Apply heal to local state
-        if (healName) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            const allPk = [p.active, ...p.bench].filter(Boolean);
-            const target = allPk.find(pk => pk.name === healName);
-            if (target) {
-              target.damage = Math.max(0, (target.damage || 0) - (event.amount || 0));
-              target.hp = Math.min(target.maxHp, target.maxHp - target.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'energy_gain':
-      case 'energyGain': {
-        const enSel = findSel(event.pokemon);
-        if (enSel) {
-          animateEl(enSel, 'energy-gain', 400);
-          spawnParticlesAtEl(enSel, '#F7D02C', 6, {spread:30, size:4});
-          showEnergyPopup(enSel, '+' + (event.amount || 1) + ' ⚡');
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'mana_gain':
-      case 'manaGain': {
-        if (event.player) showManaPopupForPlayer(event.player, event.amount);
-        else showManaPopup(event.amount);
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'switch_active':
-      case 'retreat': {
-        const actSel = event.player ? getPokemonSelector(event.player, -1) : '#youField .active-slot';
-        animateEl(actSel, 'slide-out', 320);
-        await delay(320);
-        if (event.player) {
-          const swOwner = G.players[event.player];
-          const fromBenchIdx = event.benchIdx != null ? event.benchIdx : null;
-          if (swOwner && fromBenchIdx != null && swOwner.bench[fromBenchIdx]) {
-            const incoming = swOwner.bench.splice(fromBenchIdx, 1)[0];
-            if (swOwner.active && swOwner.active.hp > 0) swOwner.bench.push(swOwner.active);
-            swOwner.active = incoming;
-          }
-        }
-        renderBattle();
-        animateEl(actSel, 'slide-in', 320);
-        await delay(320);
-        break;
-      }
-      case 'retreat_pending': {
-        renderBattle();
-        break;
-      }
-      case 'play_pokemon': {
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'item_proc':
-      case 'itemProc': {
-        const ipSel = findSel(event.pokemon);
-        if (ipSel) {
-          animateEl(ipSel, 'item-proc', 600);
-          if (event.effect === 'energyGain' && event.amount) showEnergyPopup(ipSel, '+' + event.amount + ' ⚡');
-          if (event.effect === 'heal' && event.amount) showDamagePopupAt(event.amount, ipSel, true);
-          if (event.effect === 'focusSash') showDamagePopupAt(0, ipSel, true);
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'reactiveDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const rdSel = findSel(event.target);
-        if (rdSel) {
-          showDamagePopupAt(event.amount, rdSel, false);
-          animateEl(rdSel, 'hit-shake', 500);
-        }
-        // Apply reactive damage to local state
-        if (event.target) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.target) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'recoilDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const rcSel = findSel(event.pokemon);
-        if (rcSel) showDamagePopupAt(event.amount, rcSel, false);
-        // Apply recoil damage to local state
-        if (event.pokemon) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.pokemon) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'switch_turn': {
-        showTurnOverlay(event.playerName || ('Player ' + event.player + "'s Turn"));
-        await delay(1000);
-        renderBattle();
-        break;
-      }
-      case 'extra_turn_start': {
-        showTurnOverlay((event.playerName || ('Player ' + event.player)) + ' gets an extra turn!');
-        await delay(1000);
-        renderBattle();
-        break;
-      }
-      case 'confusion_fail': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'filtered':
-      case 'noDamage': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'forceSwitch': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'ability_effect':
-      case 'ability_targeting': {
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'ability_damage': {
-        captureHpState(); _hpPreCaptured = true;
-        const abSel = findSel(event.target);
-        if (abSel) {
-          showDamagePopupAt(event.amount, abSel, false);
-          animateEl(abSel, 'hit-shake', 450);
-        }
-        if (event.target && event.amount) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            const allPk = [p.active, ...p.bench].filter(Boolean);
-            const target = allPk.find(pk => pk.name === event.target);
-            if (!target) continue;
-            target.damage = (target.damage || 0) + event.amount;
-            target.hp = Math.max(0, target.maxHp - target.damage);
-            break;
-          }
-        }
-        renderBattle();
-        await delay(450);
-        break;
-      }
-      case 'discard_item': {
-        renderBattle();
-        break;
-      }
-      case 'needNewActive': {
-        renderBattle();
-        break;
-      }
-      case 'win': {
-        // Handled after replay
-        renderBattle();
-        break;
-      }
-      case 'log': {
-        // Already in G.log, just re-render
-        break;
-      }
-      case 'phase_change': {
-        // Handled in handleGameState
-        renderBattle();
-        break;
-      }
-      default: {
-        // Unknown event type — just render
-        renderBattle();
-        break;
-      }
-    }
-  }
-
-  isReplayingEvents = false;
+  // Online event replay is now handled by AnimQueue.replayEvents (shared with offline path).
+  // This stub is kept for any legacy callers.
 }
 
 // ============================================================
@@ -2253,9 +1922,9 @@ function renderOnlineSetup() {
       </div>`;
     }
   }
-  const canConfirmBench = !isActive && onlineSetupSelected.length === 0 && !onlineSetupItemFor && pokemonHand.every(c => remainingMana < getPokemonData(c.name).cost);
-  const canConfirm = (onlineSetupSelected.length > 0 && !onlineSetupItemFor) || canConfirmBench;
-  previewHtml += `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="onlineConfirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActive ? 'Confirm Active' : (canConfirmBench ? 'Skip Bench (no mana)' : 'Confirm Bench')}</button>`;
+  const canSkipBench = !isActive && !onlineSetupItemFor;
+  const canConfirm = (onlineSetupSelected.length > 0 && !onlineSetupItemFor) || canSkipBench;
+  previewHtml += `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="onlineConfirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActive ? 'Confirm Active' : (onlineSetupSelected.length === 0 ? 'Skip Bench' : 'Confirm Bench')}</button>`;
   preview.innerHTML = previewHtml;
 
   document.getElementById('setupMana').textContent = `Mana: ${remainingMana}`;

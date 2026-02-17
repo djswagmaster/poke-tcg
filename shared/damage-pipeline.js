@@ -118,28 +118,29 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   var ignoreReduction = fx.indexOf('ignoreReduction') !== -1;
 
   // --- Attack-specific scaling (from fx string) ---
-  if (fx.indexOf('scaleDef:') !== -1) { var v = parseInt(fx.split('scaleDef:')[1]); baseDmg += v * defender.energy; }
-  if (fx.indexOf('scaleBoth:') !== -1) { var v = parseInt(fx.split('scaleBoth:')[1]); baseDmg += v * (attacker.energy + defender.energy); }
-  if (fx.indexOf('scaleOwn:') !== -1) { var v = parseInt(fx.split('scaleOwn:')[1]); baseDmg += v * attacker.energy; }
+  var fxVal;
+  if (fx.indexOf('scaleDef:') !== -1) { fxVal = parseInt(fx.split('scaleDef:')[1]); baseDmg += fxVal * defender.energy; }
+  if (fx.indexOf('scaleBoth:') !== -1) { fxVal = parseInt(fx.split('scaleBoth:')[1]); baseDmg += fxVal * (attacker.energy + defender.energy); }
+  if (fx.indexOf('scaleOwn:') !== -1) { fxVal = parseInt(fx.split('scaleOwn:')[1]); baseDmg += fxVal * attacker.energy; }
   if (fx.indexOf('scaleOppAll:') !== -1) {
-    var v = parseInt(fx.split('scaleOppAll:')[1]);
+    fxVal = parseInt(fx.split('scaleOppAll:')[1]);
     var oppAll = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
     var totalOppEnergy = 0;
     oppAll.forEach(function(pk) { totalOppEnergy += (pk.energy || 0); });
-    baseDmg += v * totalOppEnergy;
+    baseDmg += fxVal * totalOppEnergy;
   }
   if (fx.indexOf('scaleBench:') !== -1) {
-    var v = parseInt(fx.split('scaleBench:')[1]);
+    fxVal = parseInt(fx.split('scaleBench:')[1]);
     var myBench = G.players[currentPlayer].bench;
-    baseDmg += v * myBench.length;
+    baseDmg += fxVal * myBench.length;
     baseDmg = Math.min(baseDmg, 140);
   }
   if (fx.indexOf('sustained:') !== -1 && attacker.sustained) { baseDmg += parseInt(fx.split('sustained:')[1]); }
   if (fx.indexOf('berserk') !== -1) { baseDmg += attacker.damage; }
-  if (fx.indexOf('bonusDmg:') !== -1) { var parts = fx.split('bonusDmg:')[1].split(':'); if (defender.damage >= parseInt(parts[0])) baseDmg += parseInt(parts[1]); }
-  if (fx.indexOf('fullHpBonus:') !== -1) { var v = parseInt(fx.split('fullHpBonus:')[1]); if (defender.damage === 0) baseDmg += v; }
-  if (fx.indexOf('payback:') !== -1) { var v = parseInt(fx.split('payback:')[1]); if (attacker.damage >= 100) baseDmg += v; }
-  if (fx.indexOf('scaleDefNeg:') !== -1) { var v = parseInt(fx.split('scaleDefNeg:')[1]); baseDmg -= v * defender.energy; baseDmg = Math.max(0, baseDmg); }
+  if (fx.indexOf('bonusDmg:') !== -1) { var bdParts = fx.split('bonusDmg:')[1].split(':'); if (defender.damage >= parseInt(bdParts[0])) baseDmg += parseInt(bdParts[1]); }
+  if (fx.indexOf('fullHpBonus:') !== -1) { fxVal = parseInt(fx.split('fullHpBonus:')[1]); if (defender.damage === 0) baseDmg += fxVal; }
+  if (fx.indexOf('payback:') !== -1) { fxVal = parseInt(fx.split('payback:')[1]); if (attacker.damage >= 100) baseDmg += fxVal; }
+  if (fx.indexOf('scaleDefNeg:') !== -1) { fxVal = parseInt(fx.split('scaleDefNeg:')[1]); baseDmg -= fxVal * defender.energy; baseDmg = Math.max(0, baseDmg); }
 
   if (baseDmg <= 0) return { damage: 0, mult: 1, luckyProc: false, reduction: 0 };
 
@@ -333,12 +334,15 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
     if (selPk === pokemon) G.selectedCard = null;
   }
 
-  // Rescue Scarf (hooks: onKO)
-  if (pokemon.heldItem) {
-    var koResult = ItemDB.runItemHook('onKO', pokemon.heldItem, {
+  // Item onKO hook (Rescue Scarf: return to hand, Exp. Share: transfer energy)
+  // Run once and cache result to avoid double-calling the same hook.
+  var koItemResult = null;
+  var koItemName = pokemon.heldItem;
+  if (koItemName) {
+    koItemResult = ItemDB.runItemHook('onKO', koItemName, {
       holder: pokemon, owner: owner, G: G
     });
-    if (koResult && koResult.returnToHand) {
+    if (koItemResult && koItemResult.returnToHand) {
       owner.hand.push({ name: pokemon.name, type: 'pokemon', heldItem: null });
       events.push({ type: 'itemProc', item: 'Rescue Scarf', pokemon: pokemon.name, effect: 'returnToHand' });
     }
@@ -367,16 +371,12 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
+      // Reuse the cached onKO result for Exp. Share energy transfer
       var expShareTransfer = 0;
-      if (pokemon.heldItem) {
-        var expShareResult = ItemDB.runItemHook('onKO', pokemon.heldItem, {
-          holder: pokemon, owner: owner, G: G
-        });
-        if (expShareResult && expShareResult.transferEnergy) {
-          expShareTransfer = Math.min(expShareResult.transferEnergy, pokemon.energy || 0);
-          if (expShareTransfer > 0) {
-            events.push({ type: 'itemProc', item: pokemon.heldItem, pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
-          }
+      if (koItemResult && koItemResult.transferEnergy) {
+        expShareTransfer = Math.min(koItemResult.transferEnergy, pokemon.energy || 0);
+        if (expShareTransfer > 0) {
+          events.push({ type: 'itemProc', item: koItemName, pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
         }
       }
       G.pendingRetreats.push({
