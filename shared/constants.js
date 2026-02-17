@@ -48,7 +48,7 @@ var TYPE_CHART = {
 // Max bench size, max energy, KOs to win
 var MAX_BENCH = 4;
 var MAX_ENERGY = 5;
-var KOS_TO_WIN = 5;
+var KOS_TO_WIN = 6;
 var MAX_MANA = 10;
 var MANA_PER_TURN = 2;
 var STARTING_MANA = 7;

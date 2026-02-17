@@ -115,11 +115,19 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
   var baseDmg = attack.baseDmg;
   var fx = attack.fx || '';
+  var ignoreReduction = fx.indexOf('ignoreReduction') !== -1;
 
   // --- Attack-specific scaling (from fx string) ---
   if (fx.indexOf('scaleDef:') !== -1) { var v = parseInt(fx.split('scaleDef:')[1]); baseDmg += v * defender.energy; }
   if (fx.indexOf('scaleBoth:') !== -1) { var v = parseInt(fx.split('scaleBoth:')[1]); baseDmg += v * (attacker.energy + defender.energy); }
   if (fx.indexOf('scaleOwn:') !== -1) { var v = parseInt(fx.split('scaleOwn:')[1]); baseDmg += v * attacker.energy; }
+  if (fx.indexOf('scaleOppAll:') !== -1) {
+    var v = parseInt(fx.split('scaleOppAll:')[1]);
+    var oppAll = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
+    var totalOppEnergy = 0;
+    oppAll.forEach(function(pk) { totalOppEnergy += (pk.energy || 0); });
+    baseDmg += v * totalOppEnergy;
+  }
   if (fx.indexOf('scaleBench:') !== -1) {
     var v = parseInt(fx.split('scaleBench:')[1]);
     var myBench = G.players[currentPlayer].bench;
@@ -156,55 +164,60 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   var reduction = 0;
   var defAbility = PokemonDB.getPokemonData(defender.name).ability;
 
-  // Ability-based reduction (damageReduce:N)
-  if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G)) {
-    reduction += parseInt(defAbility.key.split(':')[1]);
-  }
-
-  // Item-based reduction (hooks: onTakeDamage)
-  if (defender.heldItem) {
-    var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, { holder: defender });
-    if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
-  }
-
-  // Aurora Veil (team-wide passive)
-  var allDefPokemon = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
-  if (!isPassiveBlocked(G)) {
-    for (var i = 0; i < allDefPokemon.length; i++) {
-      var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
-      if (pData.ability && pData.ability.key === 'auroraVeil') { reduction += 10; break; }
+  if (!ignoreReduction) {
+    // Ability-based reduction (damageReduce:N)
+    if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G)) {
+      reduction += parseInt(defAbility.key.split(':')[1]);
     }
-  }
 
-  // Wide Shield (team-wide item: onTeamTakeDamage)
-  if (defPlayer.active && defPlayer.active.heldItem === 'Wide Shield') {
-    var wsResult = ItemDB.runItemHook('onTeamTakeDamage', 'Wide Shield', {
-      holder: defPlayer.active, holderIsActive: true
-    });
-    if (wsResult && wsResult.reduction) reduction += wsResult.reduction;
-  }
+    // Item-based reduction (hooks: onTakeDamage)
+    if (defender.heldItem) {
+      var defItemResult = ItemDB.runItemHook('onTakeDamage', defender.heldItem, {
+        holder: defender,
+        holderCost: PokemonDB.getPokemonData(defender.name).cost
+      });
+      if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
+    }
 
-  // Shields (temporary from selfShield fx)
-  if (defender.shields && defender.shields.length > 0) {
-    for (var i = 0; i < defender.shields.length; i++) reduction += defender.shields[i];
-  }
+    // Aurora Veil (team-wide passive)
+    var allDefPokemon = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
+    if (!isPassiveBlocked(G)) {
+      for (var i = 0; i < allDefPokemon.length; i++) {
+        var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
+        if (pData.ability && pData.ability.key === 'auroraVeil') { reduction += 10; break; }
+      }
+    }
 
-  // Vulnerability (from selfVuln fx)
-  if (defender.vulnerability && defender.vulnerability > 0) {
-    reduction -= defender.vulnerability;
+    // Wide Shield (team-wide item: onTeamTakeDamage)
+    if (defPlayer.active && defPlayer.active.heldItem === 'Wide Shield') {
+      var wsResult = ItemDB.runItemHook('onTeamTakeDamage', 'Wide Shield', {
+        holder: defPlayer.active, holderIsActive: true
+      });
+      if (wsResult && wsResult.reduction) reduction += wsResult.reduction;
+    }
+
+    // Shields (temporary from selfShield fx)
+    if (defender.shields && defender.shields.length > 0) {
+      for (var i = 0; i < defender.shields.length; i++) reduction += defender.shields[i];
+    }
+
+    // Vulnerability (from selfVuln fx)
+    if (defender.vulnerability && defender.vulnerability > 0) {
+      reduction -= defender.vulnerability;
+    }
   }
 
   baseDmg = Math.max(0, baseDmg - reduction);
 
   // --- Weakness/Resistance multiplier (after flat mods) ---
-  var ignoreRes = fx.indexOf('ignoreRes') !== -1;
+  var ignoreRes = fx.indexOf('ignoreRes') !== -1 || ignoreReduction;
   var mult = calcWeaknessResistance(attackerTypes, defender);
   if (ignoreRes && mult < 1) mult = 1.0;
 
   // Item-based weakness modification (hooks: onCalcWeakness)
   if (attacker.heldItem) {
     var weakResult = ItemDB.runItemHook('onCalcWeakness', attacker.heldItem, {
-      holder: attacker, mult: mult, isOpponent: isOpponent, defenderTypes: defender.types || PokemonDB.getPokemonData(defender.name).types
+      holder: attacker, mult: mult, isOpponent: isOpponent, isOppActive: isOppActive, defenderTypes: defender.types || PokemonDB.getPokemonData(defender.name).types
     });
     if (weakResult && weakResult.mult !== undefined) mult = weakResult.mult;
   }
@@ -221,7 +234,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   }
 
   // Mega Aggron Filter: block any final damage <= 50
-  if (defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G)) {
+  if (!ignoreReduction && defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G)) {
     return { damage: 0, mult: mult, filtered: true, luckyProc: luckyProc, reduction: reduction };
   }
 
@@ -298,10 +311,11 @@ function applyDamage(G, pokemon, amount, ownerPlayerNum) {
  * Process a KO — increment scorer's KOs, handle Rescue Scarf, check win, etc.
  * Returns events array.
  */
-function handleKO(G, pokemon, ownerPlayerNum) {
+function handleKO(G, pokemon, ownerPlayerNum, options) {
   _deps();
   var opp = Constants.opp;
   var events = [];
+  options = options || {};
   var owner = G.players[ownerPlayerNum];
   var scorerNum = opp(ownerPlayerNum);
   var scorer = G.players[scorerNum];
@@ -330,6 +344,18 @@ function handleKO(G, pokemon, ownerPlayerNum) {
     }
   }
 
+  // Azurill: Bouncy Generator (active KO grants 1 mana)
+  var ownerActiveData = PokemonDB.getPokemonData(pokemon.name);
+  if (owner.active === pokemon && ownerActiveData.ability && ownerActiveData.ability.key === 'bouncyGenerator' && !isPassiveBlocked(G)) {
+    var prevMana = owner.mana;
+    owner.mana = Math.min(Constants.MAX_MANA, owner.mana + 1);
+    var gained = owner.mana - prevMana;
+    if (gained > 0) {
+      events.push({ type: 'ability_effect', ability: 'bouncyGenerator', pokemon: pokemon.name, player: ownerPlayerNum, amount: gained });
+      events.push({ type: 'mana_gain', player: ownerPlayerNum, amount: gained });
+    }
+  }
+
   // Check win
   if (scorer.kos >= Constants.KOS_TO_WIN) {
     G.winner = scorer.name;
@@ -341,7 +367,24 @@ function handleKO(G, pokemon, ownerPlayerNum) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
-      G.pendingRetreats.push({ player: ownerPlayerNum, reason: 'ko' });
+      var expShareTransfer = 0;
+      if (pokemon.heldItem) {
+        var expShareResult = ItemDB.runItemHook('onKO', pokemon.heldItem, {
+          holder: pokemon, owner: owner, G: G
+        });
+        if (expShareResult && expShareResult.transferEnergy) {
+          expShareTransfer = Math.min(expShareResult.transferEnergy, pokemon.energy || 0);
+          if (expShareTransfer > 0) {
+            events.push({ type: 'itemProc', item: pokemon.heldItem, pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
+          }
+        }
+      }
+      G.pendingRetreats.push({
+        player: ownerPlayerNum,
+        reason: 'ko',
+        endTurnAfterSwitch: options.endTurnAfterSwitch !== false,
+        expShareTransfer: expShareTransfer
+      });
       events.push({ type: 'needNewActive', player: ownerPlayerNum, reason: 'ko' });
     } else {
       // No bench left — auto-lose
@@ -368,7 +411,9 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
   _deps();
   var events = [];
 
-  if (!defender.heldItem || defender.hp <= 0) return events;
+  // Reactive on-damaged items should still trigger even if the holder was
+  // KO'd by the hit (e.g. Rocky Helmet retaliation on lethal contact).
+  if (!defender.heldItem) return events;
 
   // Weakness Policy (special: energy gain on super-effective)
   var wpResult = ItemDB.runItemHook('onDamagedByAttack', defender.heldItem, {
@@ -433,8 +478,9 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
  * @param {number} defenderOwner - Player number owning defender
  * @returns {Object} { result: calcResult, ko: boolean, events: [] }
  */
-function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defenderOwner) {
+function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defenderOwner, options) {
   _deps();
+  options = options || {};
   var attackerOwner = Constants.opp(defenderOwner);
   var events = [];
 
@@ -472,29 +518,49 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
 
   // 4. Attacker-side item effects (Shell Bell heal, Life Orb recoil)
   if (attacker.heldItem) {
-    var atkResult = ItemDB.runItemHook('onAttack', attacker.heldItem, {
-      holder: attacker, attacker: attacker, defender: defender,
-      didDamage: result.damage > 0, G: G
-    });
-    if (atkResult) {
-      if (atkResult.heal && attacker.damage > 0) {
-        attacker.damage = Math.max(0, attacker.damage - atkResult.heal);
-        attacker.hp = attacker.maxHp - attacker.damage;
-        events.push({
-          type: 'itemProc', item: attacker.heldItem, pokemon: attacker.name,
-          effect: 'heal', amount: atkResult.heal
-        });
-      }
-      if (atkResult.recoil) {
-        var recoilResult = applyDamage(G, attacker, atkResult.recoil, attackerOwner);
-        events.push({
-          type: 'recoilDamage', source: attacker.heldItem, pokemon: attacker.name,
-          amount: atkResult.recoil
-        });
-        events = events.concat(recoilResult.events);
-        if (recoilResult.ko) {
-          var recoilKO = handleKO(G, attacker, attackerOwner);
-          events = events.concat(recoilKO);
+    // One-shot per declared attack action: avoid repeated Shell Bell / Life Orb
+    // procs when a single attack applies damage multiple times (multi-target FX,
+    // self-damage FX that uses the same pipeline, etc.).
+    var attackSeq = options.attackSeq || G.attackSeq || 0;
+    if (attacker._lastOnAttackItemSeq !== attackSeq) {
+      attacker._lastOnAttackItemSeq = attackSeq;
+      var atkResult = ItemDB.runItemHook('onAttack', attacker.heldItem, {
+        holder: attacker, attacker: attacker, defender: defender,
+        didDamage: result.damage > 0, attack: attack, G: G
+      });
+      if (atkResult) {
+        if (atkResult.heal && attacker.damage > 0) {
+          attacker.damage = Math.max(0, attacker.damage - atkResult.heal);
+          attacker.hp = attacker.maxHp - attacker.damage;
+          events.push({
+            type: 'itemProc', item: attacker.heldItem, pokemon: attacker.name,
+            effect: 'heal', amount: atkResult.heal
+          });
+        }
+        if (atkResult.recoil) {
+          var recoilResult = applyDamage(G, attacker, atkResult.recoil, attackerOwner);
+          events.push({
+            type: 'recoilDamage', source: attacker.heldItem, pokemon: attacker.name,
+            amount: atkResult.recoil
+          });
+          events = events.concat(recoilResult.events);
+          if (recoilResult.ko) {
+            var recoilKO = handleKO(G, attacker, attackerOwner);
+            events = events.concat(recoilKO);
+          }
+        }
+        if (atkResult.energyGain) {
+          var beforeEnergy = attacker.energy;
+          attacker.energy = Math.min(Constants.MAX_ENERGY, attacker.energy + atkResult.energyGain);
+          var gained = attacker.energy - beforeEnergy;
+          if (gained > 0) {
+            events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: attacker.heldItem });
+          }
+        }
+        if (atkResult.lockAttackName) {
+          attacker.cantUseAttack = atkResult.lockAttackName;
+          attacker.cantUseAttackUntilTurn = G.turn + 2;
+          events.push({ type: 'lockAttack', pokemon: attacker.name, attack: atkResult.lockAttackName, source: attacker.heldItem });
         }
       }
     }

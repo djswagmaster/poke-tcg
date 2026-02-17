@@ -37,6 +37,16 @@ var ITEM_DB = [
     }
   },
 
+  {
+    name: "Eviolite", desc: "If holder cost <=3: -20 damage. Also grants +HP by cost (3:+10,2:+20,1:+30)", key: "eviolite",
+    hooks: {
+      onTakeDamage: function(ctx) {
+        if (ctx.holderCost && ctx.holderCost <= 3) return { reduction: 20 };
+        return null;
+      }
+    }
+  },
+
   // ---- Reactive (on being attacked) ----
   {
     name: "Burn Scarf", desc: "Attacked: 10 dmg + Burn", key: "burnScarf",
@@ -202,6 +212,58 @@ var ITEM_DB = [
         if (ctx.isOppActive) return { bonusDmg: 20 };
         return null;
       }
+    }
+  },
+
+  {
+    name: "Choice Band", desc: "+30 damage to opponent Active. After attacking, lock used attack next turn", key: "choiceBand",
+    hooks: {
+      onCalcDamageBonus: function(ctx) {
+        if (ctx.isOppActive) return { bonusDmg: 30 };
+        return null;
+      },
+      onAttack: function(ctx) {
+        return { lockAttackName: ctx.attack && ctx.attack.name ? ctx.attack.name : null };
+      }
+    }
+  },
+
+  {
+    name: "Choice Scarf", desc: "Attacks cost 1 less, +10 to opponent Active. Locks used attack next turn", key: "choiceScarf",
+    hooks: {
+      onAttackCost: function(ctx) { return { costReduction: 1 }; },
+      onCalcDamageBonus: function(ctx) {
+        if (ctx.isOppActive) return { bonusDmg: 10 };
+        return null;
+      },
+      onAttack: function(ctx) {
+        return { lockAttackName: ctx.attack && ctx.attack.name ? ctx.attack.name : null };
+      }
+    }
+  },
+
+  {
+    name: "Wide Lens", desc: "Before damage, opponent bench gains your types as weaknesses this turn", key: "wideLens",
+    hooks: {
+      onCalcWeakness: function(ctx) {
+        if (ctx.isOpponent && !ctx.isOppActive) return { mult: Math.max(ctx.mult, 1.5) };
+        return null;
+      }
+    }
+  },
+
+  {
+    name: "Metronome", desc: "On attack: +1 energy. If this Pokemon retreats from Active, discard this card", key: "metronome",
+    hooks: {
+      onAttack: function(ctx) { return { energyGain: 1 }; },
+      onRetreat: function(ctx) { return { discard: true }; }
+    }
+  },
+
+  {
+    name: "Exp. Share", desc: "If active is KO'd, transfer up to 2 energy to chosen replacement", key: "expShare",
+    hooks: {
+      onKO: function(ctx) { return { transferEnergy: 2 }; }
     }
   },
 
