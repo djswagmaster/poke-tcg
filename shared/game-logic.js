@@ -161,7 +161,10 @@ function startTurn(G) {
   allPokemon.forEach(function(pk) {
     pk.shields = [];
     pk.vulnerability = 0;
-    pk.cantUseAttack = null;
+    if (pk.cantUseAttack && pk.cantUseAttackUntilTurn && G.turn > pk.cantUseAttackUntilTurn) {
+      pk.cantUseAttack = null;
+      pk.cantUseAttackUntilTurn = 0;
+    }
   });
 
   // Passive start-of-turn: Berry Juice Sip (Shuckle)
@@ -376,9 +379,13 @@ function doAttack(G, attackIndex, actionOpts) {
   var attack = data.attacks[attackIndex];
   if (!attack) return false;
 
-  // Energy cost + Quick Claw + Thick Aroma
+  // Energy cost + item cost mods + Thick Aroma
   var energyCost = attack.energy;
   if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
+  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
+    var atkCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
+    if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
+  }
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
@@ -387,7 +394,7 @@ function doAttack(G, attackIndex, actionOpts) {
   if (attacker.energy < energyCost) return false;
 
   // Locked attack
-  if (attacker.cantUseAttack === attack.name) {
+  if (attacker.cantUseAttack === attack.name && (!attacker.cantUseAttackUntilTurn || attacker.cantUseAttackUntilTurn >= G.turn)) {
     addLog(G, "Can't use " + attack.name + ' this turn!', 'info');
     return false;
   }
@@ -434,14 +441,23 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   var attack = sourceData.attacks[attackIndex];
   if (!attack) return false;
 
-  // Energy cost with Thick Aroma
+  // Energy cost with item mods + Thick Aroma
   var energyCost = attack.energy;
+  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
+    var copiedCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
+    if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
+  }
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
     if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
   }
   if (attacker.energy < energyCost) return false;
+
+  if (attacker.cantUseAttack === attack.name && (!attacker.cantUseAttackUntilTurn || attacker.cantUseAttackUntilTurn >= G.turn)) {
+    addLog(G, "Can't use " + attack.name + ' this turn!', 'info');
+    return false;
+  }
 
   var fx = attack.fx || '';
   addLog(G, attacker.name + ' uses ' + attack.name + '! (copied)', 'info');
@@ -720,7 +736,11 @@ function doQuickRetreat(G) {
     addLog(G, p.active.name + " is Asleep and can't retreat!", 'info');
     return false;
   }
-  var cost = p.active.heldItem === 'Float Stone' ? 1 : 2;
+  var cost = 2;
+  if (p.active.heldItem) {
+    var retreatHook = ItemDB.runItemHook('onRetreat', p.active.heldItem, { holder: p.active, reason: 'quick' });
+    if (retreatHook && retreatHook.costReduction) cost = Math.max(0, cost - retreatHook.costReduction);
+  }
   if (p.active.energy < cost) return false;
 
   // Blockade check
@@ -747,9 +767,11 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
 
   // Only the retreat owner can select
   if (pr.player !== playerNum) return false;
+  if (pr.reason === 'ko' && G.targeting) return false;
 
   var p = G.players[pr.player];
   var oldActiveName = p.active ? p.active.name : null;
+  var oldActiveCard = p.active;
   var newActive = p.bench[benchIdx];
   if (!newActive) return false;
 
@@ -763,6 +785,16 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
     }
     p.bench.push(p.active);
   }
+  if (oldActiveCard && oldActiveCard.heldItem) {
+    var retreatItem = ItemDB.runItemHook('onRetreat', oldActiveCard.heldItem, { holder: oldActiveCard, reason: pr.reason });
+    if (retreatItem && retreatItem.discard) {
+      addLog(G, oldActiveCard.heldItem + ' was discarded from ' + oldActiveCard.name + ' on retreat!', 'info');
+      G.events.push({ type: 'itemProc', item: oldActiveCard.heldItem, pokemon: oldActiveCard.name, effect: 'discardOnRetreat' });
+      oldActiveCard.heldItemUsed = true;
+      oldActiveCard.heldItem = null;
+    }
+  }
+
   p.active = newActive;
   addLog(G, newActive.name + ' is now Active!', 'info');
   G.events.push({
@@ -778,6 +810,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
   var afterEnd = pr.afterEndTurn;
   var duringEnd = pr.duringEndTurn;
   var transferEnergy = pr.transferEnergy || 0;
+  var expShareTransfer = pr.expShareTransfer || 0;
   G.pendingRetreats.shift();
 
   // Baton Pass energy transfer
@@ -788,6 +821,16 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
     newActive.energy += gained;
     addLog(G, 'Baton Pass: ' + newActive.name + ' gained ' + gained + ' energy!', 'effect');
     G.events.push({ type: 'baton_pass', pokemon: newActive.name, energy: gained });
+  }
+
+  // Exp. Share energy transfer on active KO
+  if (reason === 'ko' && expShareTransfer > 0 && newActive) {
+    var gainFromExpShare = Math.min(expShareTransfer, Constants.MAX_ENERGY - newActive.energy);
+    if (gainFromExpShare > 0) {
+      newActive.energy += gainFromExpShare;
+      addLog(G, 'Exp. Share: ' + newActive.name + ' gained ' + gainFromExpShare + ' energy!', 'effect');
+      G.events.push({ type: 'itemProc', item: 'Exp. Share', pokemon: newActive.name, effect: 'energyTransfer', amount: gainFromExpShare });
+    }
   }
 
   // More pending retreats? Wait for those first
@@ -883,7 +926,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
   if (fromBench && (data.ability.activeOnly || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
 
   // Check already used (except unlimited ones)
-  if (key !== 'magicDrain' && p.usedAbilities[key]) {
+  if (key !== 'magicDrain' && key !== 'bubbleCleanse' && p.usedAbilities[key]) {
     addLog(G, 'Already used ' + data.ability.name + ' this turn!', 'info');
     return false;
   }
@@ -974,6 +1017,41 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
         attackInfo: { sourceType: 'ability', type: 'yummyDelivery', attacker: pk }
       };
       G.events.push({ type: 'ability_targeting', ability: key });
+      break;
+
+    case 'bubbleCleanse': // Vaporeon: unlimited self-heal by spending 1 energy
+      if (pk.energy < 1) return false;
+      if (pk.damage <= 0) return false;
+      pk.energy--;
+      pk.damage = Math.max(0, pk.damage - 30);
+      pk.hp = pk.maxHp - pk.damage;
+      addLog(G, 'Bubble Cleanse: ' + pk.name + ' healed 30 (spent 1 energy)', 'heal');
+      G.events.push({ type: 'ability_heal', ability: key, target: pk.name, amount: 30, energySpent: 1 });
+      break;
+
+    case 'leafBoost': // Leafeon: target ally +1 energy then end turn
+      var lbTargets = [];
+      if (p.active && p.active.energy < Constants.MAX_ENERGY) lbTargets.push({ player: G.currentPlayer, idx: -1, pk: p.active });
+      p.bench.forEach(function(bpk, bi) { if (bpk.energy < Constants.MAX_ENERGY) lbTargets.push({ player: G.currentPlayer, idx: bi, pk: bpk }); });
+      if (lbTargets.length === 0) return false;
+      p.usedAbilities[key] = true;
+      G.targeting = {
+        type: 'leafBoost', validTargets: lbTargets,
+        attackInfo: { sourceType: 'ability', type: 'leafBoost', attacker: pk }
+      };
+      G.events.push({ type: 'ability_targeting', ability: key });
+      break;
+
+    case 'brilliantShining': // Espeon: both players +1 mana
+      p.usedAbilities[key] = true;
+      var myBefore = p.mana;
+      var oppBefore = op(G).mana;
+      p.mana = Math.min(Constants.MAX_MANA, p.mana + 1);
+      op(G).mana = Math.min(Constants.MAX_MANA, op(G).mana + 1);
+      addLog(G, 'Brilliant Shining: both players gain 1 mana!', 'effect');
+      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, myGain: p.mana - myBefore, oppGain: op(G).mana - oppBefore });
+      if (p.mana > myBefore) G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: p.mana - myBefore });
+      if (op(G).mana > oppBefore) G.events.push({ type: 'mana_gain', player: opp(G.currentPlayer), amount: op(G).mana - oppBefore });
       break;
 
     case 'hiddenPower': // Unown: active +1 energy, turn ends
@@ -1279,6 +1357,15 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
         addLog(G, 'Healing Scarf heals ' + targetPk.name + ' 20', 'heal');
         G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: targetPk.name, amount: 20 });
       }
+      break;
+
+    case 'leafBoost':
+      if (targetPlayer !== G.currentPlayer) return false;
+      if (targetPk.energy >= Constants.MAX_ENERGY) return false;
+      targetPk.energy++;
+      addLog(G, 'Leaf Boost: ' + targetPk.name + ' gained 1 energy. Turn ends.', 'effect');
+      G.events.push({ type: 'ability_effect', ability: 'leafBoost', target: targetPk.name, amount: 1, benchIdx: targetBenchIdx });
+      endTurn(G);
       break;
   }
 

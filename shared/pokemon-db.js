@@ -123,6 +123,18 @@ var POKEMON_DB = [
     ability:{name:"Electro Charge",desc:"Once during your turn, if this is your Active Pokemon, grant this Pokemon +1 Energy",type:"active",key:"electroCharge",activeOnly:true},
     attacks:[{name:"Thunderbolt",energy:3,baseDmg:70,desc:"May do +70 damage. If you do, this Pokemon loses 2 energy",fx:"optBoost:70:2"}]},
 
+  {name:"Vaporeon",types:["Water"],cost:4,hp:240,weakness:["Electric"],resistance:["Fire"],
+    ability:{name:"Bubble Cleanse",desc:"As often as you like during your turn, spend 1 energy to heal 30 from this Pokemon",type:"active",key:"bubbleCleanse"},
+    attacks:[{name:"Hydro Splash",energy:3,baseDmg:80,desc:"",fx:""}]},
+
+  {name:"Leafeon",types:["Grass"],cost:4,hp:220,weakness:["Bug"],resistance:["Water"],
+    ability:{name:"Leaf Boost",desc:"Once during your turn, grant 1 of your Pokemon +1 energy. If you do, your turn ends",type:"active",key:"leafBoost",targeted:true},
+    attacks:[{name:"Energy Blade",energy:3,baseDmg:30,desc:"+20 per own energy",fx:"scaleOwn:20"}]},
+
+  {name:"Espeon",types:["Psychic"],cost:4,hp:190,weakness:["Dark"],resistance:["Psychic"],
+    ability:{name:"Brilliant Shining",desc:"Once during your turn, both players gain 1 mana",type:"active",key:"brilliantShining"},
+    attacks:[{name:"Energy Crush",energy:1,baseDmg:0,desc:"10x total opponent energy",fx:"scaleOppAll:10"}]},
+
   {name:"Kartana",types:["Grass","Steel"],cost:5,hp:210,weakness:["Fighting","Poison"],resistance:["Water","Poison"],
     attacks:[{name:"Beast Blade",energy:2,baseDmg:130,desc:"",fx:""}]},
 

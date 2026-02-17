@@ -1117,13 +1117,13 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   const hpPct = Math.max(0, (pk.hp / pk.maxHp) * 100);
   const hpColor = hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444';
 
-  // Determine click behavior: targeting/retreat takes priority, then card selection
+  // Determine click behavior: targeting should take priority over retreat selection
   let clickAction, imgClass;
-  if (isRetreatTarget) {
-    clickAction = `onclick="selectBenchForRetreat(${benchIdx})"`;
-    imgClass = 'targetable';
-  } else if (isTarget) {
+  if (isTarget) {
     clickAction = `onclick="selectTarget(${playerNum},${benchIdx})"`;
+    imgClass = 'targetable';
+  } else if (isRetreatTarget) {
+    clickAction = `onclick="selectBenchForRetreat(${benchIdx})"`;
     imgClass = 'targetable';
   } else {
     clickAction = `onclick="event.stopPropagation();selectCard(${playerNum},${benchIdx})"`;

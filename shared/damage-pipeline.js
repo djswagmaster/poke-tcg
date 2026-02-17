@@ -121,6 +121,13 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   if (fx.indexOf('scaleDef:') !== -1) { var v = parseInt(fx.split('scaleDef:')[1]); baseDmg += v * defender.energy; }
   if (fx.indexOf('scaleBoth:') !== -1) { var v = parseInt(fx.split('scaleBoth:')[1]); baseDmg += v * (attacker.energy + defender.energy); }
   if (fx.indexOf('scaleOwn:') !== -1) { var v = parseInt(fx.split('scaleOwn:')[1]); baseDmg += v * attacker.energy; }
+  if (fx.indexOf('scaleOppAll:') !== -1) {
+    var v = parseInt(fx.split('scaleOppAll:')[1]);
+    var oppAll = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
+    var totalOppEnergy = 0;
+    oppAll.forEach(function(pk) { totalOppEnergy += (pk.energy || 0); });
+    baseDmg += v * totalOppEnergy;
+  }
   if (fx.indexOf('scaleBench:') !== -1) {
     var v = parseInt(fx.split('scaleBench:')[1]);
     var myBench = G.players[currentPlayer].bench;
@@ -210,7 +217,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   // Item-based weakness modification (hooks: onCalcWeakness)
   if (attacker.heldItem) {
     var weakResult = ItemDB.runItemHook('onCalcWeakness', attacker.heldItem, {
-      holder: attacker, mult: mult, isOpponent: isOpponent, defenderTypes: defender.types || PokemonDB.getPokemonData(defender.name).types
+      holder: attacker, mult: mult, isOpponent: isOpponent, isOppActive: isOppActive, defenderTypes: defender.types || PokemonDB.getPokemonData(defender.name).types
     });
     if (weakResult && weakResult.mult !== undefined) mult = weakResult.mult;
   }
@@ -360,10 +367,23 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
   if (owner.active === pokemon) {
     owner.active = null;
     if (owner.bench.length > 0) {
+      var expShareTransfer = 0;
+      if (pokemon.heldItem) {
+        var expShareResult = ItemDB.runItemHook('onKO', pokemon.heldItem, {
+          holder: pokemon, owner: owner, G: G
+        });
+        if (expShareResult && expShareResult.transferEnergy) {
+          expShareTransfer = Math.min(expShareResult.transferEnergy, pokemon.energy || 0);
+          if (expShareTransfer > 0) {
+            events.push({ type: 'itemProc', item: pokemon.heldItem, pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
+          }
+        }
+      }
       G.pendingRetreats.push({
         player: ownerPlayerNum,
         reason: 'ko',
-        endTurnAfterSwitch: options.endTurnAfterSwitch !== false
+        endTurnAfterSwitch: options.endTurnAfterSwitch !== false,
+        expShareTransfer: expShareTransfer
       });
       events.push({ type: 'needNewActive', player: ownerPlayerNum, reason: 'ko' });
     } else {
@@ -506,7 +526,7 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
       attacker._lastOnAttackItemSeq = attackSeq;
       var atkResult = ItemDB.runItemHook('onAttack', attacker.heldItem, {
         holder: attacker, attacker: attacker, defender: defender,
-        didDamage: result.damage > 0, G: G
+        didDamage: result.damage > 0, attack: attack, G: G
       });
       if (atkResult) {
         if (atkResult.heal && attacker.damage > 0) {
@@ -528,6 +548,19 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
             var recoilKO = handleKO(G, attacker, attackerOwner);
             events = events.concat(recoilKO);
           }
+        }
+        if (atkResult.energyGain) {
+          var beforeEnergy = attacker.energy;
+          attacker.energy = Math.min(Constants.MAX_ENERGY, attacker.energy + atkResult.energyGain);
+          var gained = attacker.energy - beforeEnergy;
+          if (gained > 0) {
+            events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: attacker.heldItem });
+          }
+        }
+        if (atkResult.lockAttackName) {
+          attacker.cantUseAttack = atkResult.lockAttackName;
+          attacker.cantUseAttackUntilTurn = G.turn + 2;
+          events.push({ type: 'lockAttack', pokemon: attacker.name, attack: atkResult.lockAttackName, source: attacker.heldItem });
         }
       }
     }
