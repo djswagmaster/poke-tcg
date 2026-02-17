@@ -180,7 +180,7 @@ var POKEMON_DB = [
     attacks:[{name:"Steel Force",energy:4,baseDmg:80,desc:"-30 dmg next turn",fx:"selfShield:30"}]},
 
   {name:"Mega Audino",types:["Normal","Fairy"],cost:4,hp:260,weakness:["Poison"],resistance:["Ghost","Dragon"],
-    ability:{name:"Mega Checkup",desc:"1 mana: heal 30 + clear status",type:"active",key:"healingTouch",targeted:true},
+    ability:{name:"Mega Checkup",desc:"1 mana: heal 30 + clear status on Active",type:"active",key:"healingTouch"},
     attacks:[{name:"Careful Hearing",energy:3,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
 
   {name:"Mega Blaziken",types:["Fire","Fighting"],cost:5,hp:210,weakness:["Water","Flying"],resistance:["Grass","Steel"],

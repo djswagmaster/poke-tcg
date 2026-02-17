@@ -928,7 +928,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
   if (fromBench && (data.ability.activeOnly || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
 
   // Check already used (except unlimited ones)
-  if (key !== 'magicDrain' && key !== 'bubbleCleanse' && p.usedAbilities[key]) {
+  if (key !== 'magicDrain' && key !== 'bubbleCleanse' && key !== 'healingTouch' && p.usedAbilities[key]) {
     addLog(G, 'Already used ' + data.ability.name + ' this turn!', 'info');
     return false;
   }
@@ -985,25 +985,21 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_effect', ability: key, target: op(G).active.name });
       break;
 
-    case 'healingTouch': // Mega Audino: 1 mana, heal 30 + cure status
+    case 'healingTouch': // Mega Audino: 1 mana, heal 30 + cure status on Active (unlimited)
       if (p.mana < 1) return false;
+      if (!p.active) return false;
+      if (p.active.damage <= 0 && (!p.active.status || p.active.status.length === 0)) return false;
       p.mana--;
-      // Target selection for heal
-      var htTargets = [];
-      var allMy = [p.active].concat(p.bench).filter(Boolean);
-      allMy.forEach(function(mpk, i) {
-        if (mpk.damage > 0 || (mpk.status && mpk.status.length > 0)) {
-          htTargets.push({ player: G.currentPlayer, idx: mpk === p.active ? -1 : p.bench.indexOf(mpk), pk: mpk });
-        }
-      });
-      if (htTargets.length > 0) {
-        G.targeting = {
-          type: 'healingTouch', validTargets: htTargets,
-          attackInfo: { sourceType: 'ability', type: 'healingTouch', attacker: pk }
-        };
+      var htTarget = p.active;
+      var htHealed = Math.min(30, htTarget.damage);
+      htTarget.damage = Math.max(0, htTarget.damage - 30);
+      htTarget.hp = htTarget.maxHp - htTarget.damage;
+      if (htTarget.status && htTarget.status.length > 0) {
+        addLog(G, 'Mega Checkup: cured ' + htTarget.name + "'s status!", 'heal');
+        htTarget.status = [];
       }
-      p.usedAbilities[key] = true;
-      G.events.push({ type: 'ability_effect', ability: key });
+      if (htHealed > 0) addLog(G, 'Mega Checkup: healed ' + htHealed + ' from ' + htTarget.name, 'heal');
+      G.events.push({ type: 'ability_heal', ability: key, target: htTarget.name, amount: htHealed });
       break;
 
     case 'yummyDelivery': // Slurpuff: choose bench +1 energy free
@@ -1268,7 +1264,7 @@ function getCopiedAttacks(G) {
 }
 
 // ============================================================
-// ABILITY TARGET RESOLUTION (softTouch, creepingChill, healingTouch)
+// ABILITY TARGET RESOLUTION (softTouch, creepingChill, etc.)
 // ============================================================
 function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
   if (!G.targeting) return false;
@@ -1289,14 +1285,6 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       targetPk.hp = targetPk.maxHp - targetPk.damage;
       addLog(G, 'Egg Drop Heal: ' + targetPk.name + ' healed 10', 'heal');
       G.events.push({ type: 'ability_heal', ability: 'softTouch', target: targetPk.name, amount: 10 });
-      break;
-
-    case 'healingTouch':
-      targetPk.status = [];
-      targetPk.damage = Math.max(0, targetPk.damage - 30);
-      targetPk.hp = targetPk.maxHp - targetPk.damage;
-      addLog(G, 'Mega Checkup: ' + targetPk.name + ' healed 30 + status cured!', 'heal');
-      G.events.push({ type: 'ability_heal', ability: 'healingTouch', target: targetPk.name, amount: 30, cured: true });
       break;
 
     case 'creepingChill':
