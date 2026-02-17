@@ -63,17 +63,15 @@ function calcWeaknessResistance(attackerTypes, defender, currentTurn) {
 // PASSIVE BLOCKED CHECK
 // ============================================================
 function isPassiveBlocked(G) {
-  // Neutralizing Gas blocks passives on both actives
-  var p1Active = G.players[1].active;
-  var p2Active = G.players[2].active;
+  // Neutralizing Gas blocks passives if any Pokemon in play has it
   _deps();
-  if (p1Active) {
-    var d1 = PokemonDB.getPokemonData(p1Active.name);
-    if (d1.ability && d1.ability.key === 'neutralizingGas') return true;
-  }
-  if (p2Active) {
-    var d2 = PokemonDB.getPokemonData(p2Active.name);
-    if (d2.ability && d2.ability.key === 'neutralizingGas') return true;
+  for (var pNum = 1; pNum <= 2; pNum++) {
+    var side = G.players[pNum];
+    var all = [side.active].concat(side.bench).filter(Boolean);
+    for (var i = 0; i < all.length; i++) {
+      var d = PokemonDB.getPokemonData(all[i].name);
+      if (d.ability && d.ability.key === 'neutralizingGas') return true;
+    }
   }
   return false;
 }

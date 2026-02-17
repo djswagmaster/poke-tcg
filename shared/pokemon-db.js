@@ -17,7 +17,7 @@ var POKEMON_DB = [
     attacks:[{name:"Frost Over",energy:3,baseDmg:50,desc:"+10 per energy on defender",fx:"scaleDef:10"}]},
 
   {name:"Alolan Raichu",types:["Electric","Psychic"],cost:4,hp:150,weakness:["Ground","Dark"],resistance:["Steel","Fighting"],
-    ability:{name:"Spark Surfer",desc:"Free retreat once per turn",type:"passive",key:"sparkSurfer"},
+    ability:{name:"Spark Surfer",desc:"Free retreat once per turn",type:"active",key:"sparkSurfer"},
     attacks:[{name:"Psychic",energy:3,baseDmg:20,desc:"+20 per energy on defender",fx:"scaleDef:20"}]},
 
   {name:"Arceus",types:["Normal"],cost:6,hp:300,weakness:[],resistance:["Ghost"],
@@ -59,7 +59,7 @@ var POKEMON_DB = [
     attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 4 energy. Take another turn after this one",fx:"selfEnergyLoss:4,extraTurn"}]},
 
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
-    ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise"},
+    ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise",activeOnly:true},
     attacks:[{name:"Slap",energy:2,baseDmg:30,desc:"",fx:""}]},
 
   {name:"Drednaw",types:["Water","Rock"],cost:4,hp:200,weakness:["Electric","Water"],resistance:["Water","Flying"],
@@ -184,7 +184,7 @@ var POKEMON_DB = [
     attacks:[{name:"Careful Hearing",energy:3,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
 
   {name:"Mega Blaziken",types:["Fire","Fighting"],cost:5,hp:210,weakness:["Water","Flying"],resistance:["Grass","Steel"],
-    ability:{name:"Mega Speed",desc:"Grant self +1 energy (1/turn)",type:"active",key:"megaSpeed"},
+    ability:{name:"Mega Speed",desc:"Grant self +1 energy (1/turn)",type:"active",key:"megaSpeed",activeOnly:true},
     attacks:[{name:"Inferno Kick",energy:2,baseDmg:110,desc:"Lose 1 energy, Burn",fx:"selfEnergyLoss:1,burn"}]},
 
   {name:"Mega Mewtwo X",types:["Psychic","Fighting"],cost:7,hp:270,weakness:["Ghost","Flying"],resistance:["Fighting","Flying"],
@@ -306,7 +306,7 @@ var POKEMON_DB = [
              {name:"Moonlit Blade",energy:3,baseDmg:90,desc:"-10 per def energy",fx:"scaleDefNeg:10"}]},
 
   {name:"Unown",types:["Psychic"],cost:2,hp:130,weakness:["Dark"],resistance:["Fighting"],
-    ability:{name:"Ancient Energy",desc:"Active +1 energy, turn ends",type:"active",key:"hiddenPower",activeOnly:true},
+    ability:{name:"Ancient Energy",desc:"Active +1 energy, turn ends",type:"active",key:"hiddenPower"},
     attacks:[{name:"Psy Pulse",energy:1,baseDmg:40,desc:"",fx:""}]},
 
   {name:"Vileplume",types:["Grass","Poison"],cost:4,hp:200,weakness:["Ground"],resistance:["Water"],

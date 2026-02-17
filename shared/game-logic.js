@@ -223,7 +223,7 @@ function endTurn(G) {
   var p = cp(G);
   var events = [];
 
-  // Suicune Aqua Ring (strip from opp at end of owner's turn)
+  // Suicune Freezing Winds (strip from opp at end of owner's turn)
   var allMine = [p.active].concat(p.bench).filter(Boolean);
   allMine.forEach(function(pk) {
     var d = PokemonDB.getPokemonData(pk.name);
@@ -231,7 +231,7 @@ function endTurn(G) {
       var target = op(G).active;
       if (target && target.energy > 0 && target.heldItem !== 'Protect Goggles') {
         target.energy = Math.max(0, target.energy - 1);
-        addLog(G, 'Aqua Ring strips 1 energy from ' + target.name, 'effect');
+        addLog(G, 'Freezing Winds strips 1 energy from ' + target.name, 'effect');
         G.events.push({ type: 'ability_effect', ability: 'aquaRing', target: target.name, effect: 'stripEnergy' });
       }
     }

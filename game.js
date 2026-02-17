@@ -1439,7 +1439,7 @@ function renderActionPanel() {
     </button>`;
 
     // Ability (if this bench pokemon has an active ability)
-    if (data.ability && data.ability.type === 'active' && data.ability.key !== 'improvise') {
+    if (data.ability && data.ability.type === 'active') {
       const used = me.usedAbilities[data.ability.key];
       const canUse = canUseAbilityFromSelection(data.ability.key, used, sel.benchIdx);
       html += '<div class="ap-section-label">ABILITY</div>';
