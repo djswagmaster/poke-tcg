@@ -39,12 +39,19 @@ var AnimQueue = (function() {
       }
     }
     running = false;
-    if (onDrain) onDrain();
+    if (onDrain) { var cb = onDrain; onDrain = null; cb(); }
   }
 
   function isRunning() { return running; }
   function clear() { queue = []; running = false; }
-  function setOnDrain(cb) { onDrain = cb; }
+  function setOnDrain(cb) {
+    if (onDrain) {
+      var prev = onDrain;
+      onDrain = function() { prev(); cb(); };
+    } else {
+      onDrain = cb;
+    }
+  }
 
   // ============================================================
   // EVENT REPLAY: Translate game events into animations
@@ -380,7 +387,7 @@ var AnimQueue = (function() {
           }
         }
         var switchSide = '#youField';
-        if (evt.player !== window.G.currentPlayer) switchSide = '#oppField';
+        if (typeof window !== 'undefined' && window.G && evt.player !== window.G.currentPlayer) switchSide = '#oppField';
         ctx.renderBattle();
         ctx.animateEl(switchSide + ' .active-slot', 'slide-in', 350);
         await ctx.delay(500);
@@ -453,6 +460,70 @@ var AnimQueue = (function() {
 
       case 'noDamage':
         ctx.renderBattle();
+        break;
+
+      case 'energyStrip':
+        // Progressively apply energy strip to defender
+        var esSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        if (esSel) {
+          ctx.showEnergyPopup(esSel, '-' + (evt.amount || 1) + ' \u26A1');
+          ctx.animateEl(esSel, 'hit-shake', 350);
+        }
+        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
+          var esPk = _findPokemonObj(evt.pokemon);
+          if (esPk) esPk.energy = Math.max(0, (esPk.energy || 0) - (evt.amount || 1));
+        }
+        ctx.renderBattle();
+        await ctx.delay(400);
+        break;
+
+      case 'selfEnergyLoss':
+        // Progressively apply self energy loss
+        var selSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        if (selSel) {
+          ctx.showEnergyPopup(selSel, '-' + (evt.amount || 1) + ' \u26A1');
+        }
+        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
+          var selPk = _findPokemonObj(evt.pokemon);
+          if (selPk) selPk.energy = Math.max(0, (selPk.energy || 0) - (evt.amount || 1));
+        }
+        ctx.renderBattle();
+        await ctx.delay(350);
+        break;
+
+      case 'selfBenchDmg':
+        // Progressively apply bench damage
+        if (ctx.captureHpState) ctx.captureHpState();
+        var sbdSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        if (sbdSel) {
+          ctx.showDamagePopupAt(evt.amount, sbdSel, false);
+          ctx.animateEl(sbdSel, 'hit-shake', 400);
+        }
+        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
+          var sbdPk = _findPokemonObj(evt.pokemon);
+          if (sbdPk) {
+            sbdPk.damage = (sbdPk.damage || 0) + evt.amount;
+            sbdPk.hp = Math.max(0, sbdPk.maxHp - sbdPk.damage);
+          }
+        }
+        ctx.renderBattle();
+        await ctx.delay(450);
+        break;
+
+      case 'baton_pass':
+        // Progressively apply baton pass energy gain
+        var bpSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        if (bpSel) {
+          ctx.showEnergyPopup(bpSel, '+' + (evt.energy || 0) + ' \u26A1');
+          ctx.animateEl(bpSel, 'energy-gain', 400);
+          ctx.spawnParticlesAtEl(bpSel, '#F7D02C', 6, { spread: 30, size: 4 });
+        }
+        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
+          var bpPk = _findPokemonObj(evt.pokemon);
+          if (bpPk) bpPk.energy = Math.min((bpPk.energy || 0) + (evt.energy || 0), 5);
+        }
+        ctx.renderBattle();
+        await ctx.delay(400);
         break;
 
       default:

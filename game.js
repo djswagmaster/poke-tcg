@@ -379,6 +379,19 @@ function dispatchAction(action) {
 
 // Snapshot/restore helpers for animation replay.
 // Only captures the fields that change during processAction and affect rendering.
+// Deep-clone a Pokemon object so array fields (status, shields, types, etc.)
+// are not shared by reference between snapshot and live state.
+function clonePokemon(pk) {
+  if (!pk) return null;
+  var c = Object.assign({}, pk);
+  if (c.status) c.status = c.status.slice();
+  if (c.shields) c.shields = c.shields.slice();
+  if (c.types) c.types = c.types.slice();
+  if (c.weakness) c.weakness = c.weakness.slice();
+  if (c.resistance) c.resistance = c.resistance.slice();
+  return c;
+}
+
 function snapshotGameState() {
   const snap = {
     currentPlayer: G.currentPlayer,
@@ -396,8 +409,8 @@ function snapshotGameState() {
       mana: p.mana,
       kos: p.kos,
       maxBench: p.maxBench,
-      active: p.active ? Object.assign({}, p.active) : null,
-      bench: p.bench.map(pk => Object.assign({}, pk)),
+      active: clonePokemon(p.active),
+      bench: p.bench.map(pk => clonePokemon(pk)),
       hand: p.hand.slice(),
       usedAbilities: Object.assign({}, p.usedAbilities),
     };
@@ -541,6 +554,7 @@ function actionQuickRetreat() {
 }
 
 function selectBenchForRetreat(idx) {
+  if (G.animating) return;
   if (isOnline) { sendAction({ actionType: 'selectBenchForRetreat', benchIdx: idx }); return; }
   if (G.pendingRetreats.length === 0) return;
   const pr = G.pendingRetreats[0];
@@ -548,11 +562,13 @@ function selectBenchForRetreat(idx) {
 }
 
 function discardHeldItem(slot, benchIdx) {
+  if (G.animating) return;
   if (isOnline) { sendAction({ actionType: 'discardItem', slot, benchIdx }); return; }
   dispatchAction({ type: 'discardItem', slot, benchIdx });
 }
 
 function selectTarget(playerNum, benchIdx) {
+  if (G.animating) return;
   if (!G.targeting) return;
   if (isOnline) { sendAction({ actionType: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx }); return; }
   dispatchAction({ type: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx });
@@ -617,6 +633,7 @@ function renderItemAttachPrompt(handIdx, items) {
 }
 
 function finishPlayPokemon(handIdx, itemHandIdx) {
+  if (G.animating) return;
   G.pendingPlayPokemon = null;
   if (isOnline) {
     sendAction({ actionType: 'playPokemon', handIdx, itemHandIdx });
@@ -712,6 +729,8 @@ let dbSelection = [];
 let dbTab = 'pokemon';
 
 function initDeckBuild(playerNum) {
+  AnimQueue.clear();
+  G.animating = false;
   if (playerNum === 1) {
     for (let p = 1; p <= 2; p++) {
       G.players[p].maxBench = Constants.MAX_BENCH;
@@ -1748,11 +1767,15 @@ function handleGameState(state, events) {
 
   // Handle phase transitions
   if (state.phase === 'deckBuild') {
+    AnimQueue.clear();
+    G.animating = false;
     applyServerState(state);
     showScreen('deckBuildScreen');
     document.getElementById('dbPlayerTag').textContent = G.players[myPlayerNum].name;
     renderDeckBuild();
   } else if (state.phase === 'setupActive' || state.phase === 'setupBench') {
+    AnimQueue.clear();
+    G.animating = false;
     applyServerState(state);
     showOnlineSetupScreen(state.phase);
   } else if (state.phase === 'battle') {
