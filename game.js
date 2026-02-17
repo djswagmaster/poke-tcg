@@ -1000,13 +1000,22 @@ function confirmSetup() {
     G.players[1].mana = 0;
     G.players[2].mana = 0;
     showScreen('battleScreen');
-    // Use shared game logic for start of turn
+    // Snapshot before startTurn so animation replay can apply state
+    // progressively (same pattern as dispatchAction). Without this,
+    // startTurn mutates mana and the mana_gain animation adds it again.
+    const preSnap = snapshotGameState();
     G.events = [];
     GameLogic.startTurn(G);
     const startEvents = G.events.slice();
     G.events = [];
+    const postSnap = snapshotGameState();
+    restoreGameState(preSnap);
     AnimQueue.replayEvents(startEvents, animCtx);
-    AnimQueue.setOnDrain(() => { G.animating = false; renderBattle(); });
+    AnimQueue.setOnDrain(() => {
+      restoreGameState(postSnap);
+      G.animating = false;
+      renderBattle();
+    });
     renderBattle();
   }
 }
@@ -1285,10 +1294,12 @@ function renderActionPanel() {
 
       const opt = getOptBoostMeta(atk);
       if (opt) {
-        const canUseBoost = canUse && pk.energy >= (cost + opt.energyCost);
+        // Energy is a threshold, not consumed by the base attack.
+        // The boost only deducts opt.energyCost from current energy.
+        const canUseBoost = canUse && pk.energy >= opt.energyCost;
         html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
           <span class="atk-name">${atk.name} ★ Boost${dmgLabel ? ` (+${opt.extraDmg})` : ''}</span>
-          <span class="atk-detail">${costLabel} + ${opt.energyCost}⚡ | ${atk.desc || ''}</span>
+          <span class="atk-detail">${costLabel} (−${opt.energyCost}⚡) | ${atk.desc || ''}</span>
         </button>`;
       }
     });
@@ -1309,10 +1320,10 @@ function renderActionPanel() {
           </button>`;
           const opt = getOptBoostMeta(atk);
           if (opt) {
-            const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+            const canUseBoost = canUse && pk.energy >= opt.energyCost;
             html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
               <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
-              <span class="atk-detail">${cCostLabel} + ${opt.energyCost}⚡ | from ${benchPk.name}</span>
+              <span class="atk-detail">${cCostLabel} (−${opt.energyCost}⚡) | from ${benchPk.name}</span>
             </button>`;
           }
         });
@@ -1335,10 +1346,10 @@ function renderActionPanel() {
         </button>`;
         const opt = getOptBoostMeta(atk);
         if (opt) {
-          const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
+          const canUseBoost = canUse && pk.energy >= opt.energyCost;
           html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
             <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
-            <span class="atk-detail">${dCostLabel} + ${opt.energyCost}⚡ | from ${op().active.name}</span>
+            <span class="atk-detail">${dCostLabel} (−${opt.energyCost}⚡) | from ${op().active.name}</span>
           </button>`;
         }
       });

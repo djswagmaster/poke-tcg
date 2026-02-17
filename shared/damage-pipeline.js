@@ -36,13 +36,14 @@ function _deps() {
 // ============================================================
 // WEAKNESS / RESISTANCE
 // ============================================================
-function calcWeaknessResistance(attackerTypes, defender) {
+function calcWeaknessResistance(attackerTypes, defender, currentTurn) {
   _deps();
   var weakness = defender.weakness || [];
   var resistance = defender.resistance || [];
 
   // Temporary grass weakness (from Forest's Curse)
-  if (defender.grassWeakUntil && defender.grassWeakUntil > 0) {
+  // grassWeakUntil stores the turn number when the effect expires.
+  if (defender.grassWeakUntil && defender.grassWeakUntil > (currentTurn || 0)) {
     if (weakness.indexOf('Grass') === -1) weakness = weakness.concat(['Grass']);
   }
 
@@ -212,7 +213,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
   // --- Weakness/Resistance multiplier (after flat mods) ---
   var ignoreRes = fx.indexOf('ignoreRes') !== -1 || ignoreReduction;
-  var mult = calcWeaknessResistance(attackerTypes, defender);
+  var mult = calcWeaknessResistance(attackerTypes, defender, G.turn);
   if (ignoreRes && mult < 1) mult = 1.0;
 
   // Item-based weakness modification (hooks: onCalcWeakness)
