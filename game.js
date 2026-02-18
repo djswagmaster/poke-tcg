@@ -1453,13 +1453,17 @@ function renderActionPanel() {
 
     // Attacks
     html += '<div class="ap-section-label">ATTACKS</div>';
+    // Check for Choice Scarf cost reduction
+    const pkItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    const hasScarfReduction = pkItems.indexOf('Choice Scarf') !== -1 ? 1 : 0;
     data.attacks.forEach((atk, i) => {
       let cost = atk.energy;
       if (pk.quickClawActive) cost = Math.max(0, cost - 2);
+      if (hasScarfReduction) cost = Math.max(0, cost - hasScarfReduction);
       cost += thickAromaCost;
       const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-      const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+      const costLabel = (thickAromaCost > 0 || hasScarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
         <span class="atk-name">${atk.name}${dmgLabel}</span>
         <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>

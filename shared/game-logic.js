@@ -422,10 +422,8 @@ function doAttack(G, attackIndex, actionOpts) {
   // Energy cost + item cost mods + Thick Aroma
   var energyCost = attack.energy;
   if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
-  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
-    var atkCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
-    if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
-  }
+  var atkCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
+  if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
@@ -483,10 +481,8 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
 
   // Energy cost with item mods + Thick Aroma
   var energyCost = attack.energy;
-  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
-    var copiedCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
-    if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
-  }
+  var copiedCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
+  if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);

@@ -651,5 +651,7 @@ exports.handleKO = handleKO;
 exports.runReactiveItems = runReactiveItems;
 exports.dealAttackDamage = dealAttackDamage;
 exports.dealStatusDamage = dealStatusDamage;
+exports.getHeldItems = getHeldItems;
+exports.runItemHookAll = runItemHookAll;
 
 })(typeof module !== 'undefined' && module.exports ? module.exports : (this.DamagePipeline = {}));
