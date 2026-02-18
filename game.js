@@ -1408,18 +1408,22 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   const isMine = playerNum === meNum();
   const isMyTurnNow = isOnline ? isMyTurn() : true;
   let glowClass = '';
+  let hasUsableAbility = false;
   if (isMine && isMyTurnNow && !G.animating && G.pendingRetreats.length === 0 && !G.targeting) {
     const data = getPokemonData(pk.name);
-    const me = isOnline ? G.players[myPlayerNum] : cp();
+    const meP = isOnline ? G.players[myPlayerNum] : cp();
     // Yellow glow: active pokemon that has an affordable attack
     if (benchIdx === -1 && data.attacks && data.attacks.some(atk => pk.energy >= atk.energy && !pk.status.includes('sleep'))) {
       glowClass = 'glow-attack';
     }
     // Green glow: has usable active ability
     if (data.ability && data.ability.type === 'active') {
-      const used = me.usedAbilities[data.ability.key];
+      const used = meP.usedAbilities[data.ability.key];
       const canUse = canUseAbilityFromSelection(data.ability.key, used, benchIdx);
-      if (canUse) glowClass += (glowClass ? ' ' : '') + 'glow-ability';
+      if (canUse) {
+        glowClass += (glowClass ? ' ' : '') + 'glow-ability';
+        hasUsableAbility = true;
+      }
     }
   }
 
@@ -1430,8 +1434,12 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   let statusHtml = '';
   if (pk.status.length > 0) statusHtml = pk.status.map(s => `<span class="fp-status ${s}">${s.toUpperCase()}</span>`).join(' ');
 
+  // Ability badge for bench pokemon with usable abilities (makes it extra clear)
+  const abilityBadgeHtml = (hasUsableAbility && benchIdx >= 0) ? '<div class="fp-ability-badge">ABILITY</div>' : '';
+
   return `<div class="field-pokemon ${slotClass} ${glowClass} ${selectedClass}">
     <div class="fp-img-wrap">
+      ${abilityBadgeHtml}
       <img class="fp-img ${imgClass}" src="${getImg(pk.name)}" alt="${pk.name}" ${clickAction}>
       ${(pk.heldItems && pk.heldItems.length > 0 ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : [])).map((hi, hiIdx) => `<img class="fp-held-item" src="${getImg(hi)}" alt="${hi}" title="${hi}" onclick="event.stopPropagation();zoomCard('${hi.replace(/'/g,"\\'")}')" style="cursor:pointer;${hiIdx > 0 ? 'right:' + (4 + hiIdx * 14) + 'px' : ''}">`).join('')}
     </div>

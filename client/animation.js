@@ -69,6 +69,13 @@ var AnimQueue = (function() {
   // }
   // ============================================================
 
+  // Normalize benchIdx: null, undefined, and -1 all mean "active" (-1).
+  // Only non-negative integers mean a bench slot.
+  function _normBenchIdx(val) {
+    if (val === null || val === undefined || val < 0) return -1;
+    return val;
+  }
+
   // Helper: find a pokemon object in window.G.
   // Prefer owner+benchIdx when available (precise), fall back to name (legacy).
   function _findPokemonObj(name, owner, benchIdx) {
@@ -139,7 +146,7 @@ var AnimQueue = (function() {
       // ==========================================================
       case 'damage':
         if (ctx.captureHpState) ctx.captureHpState();
-        var dmgBenchIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : -1;
+        var dmgBenchIdx = _normBenchIdx(evt.benchIdx);
         var dmgSel = null;
         if (evt.targetOwner) dmgSel = ctx.getPokemonSelector(evt.targetOwner, dmgBenchIdx);
         if (!dmgSel && ctx.findPokemonSelector && evt.target) dmgSel = ctx.findPokemonSelector(evt.target);
@@ -243,7 +250,7 @@ var AnimQueue = (function() {
       case 'ko':
         // Use isActive/benchIdx from event when available (precise), else infer from state
         var koIsActive = evt.isActive !== undefined ? evt.isActive : true;
-        var koBenchIdx = evt.benchIdx !== undefined ? evt.benchIdx : -1;
+        var koBenchIdx = _normBenchIdx(evt.benchIdx);
         if (koIsActive === true && koBenchIdx === -1) {
           // Double check: if active doesn't match name, search bench
           if (typeof window !== 'undefined' && window.G && evt.owner) {
@@ -450,7 +457,7 @@ var AnimQueue = (function() {
       case 'energy_gain':
       case 'energyGain':
         var egSel = null;
-        if (evt.owner) egSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
+        if (evt.owner) egSel = ctx.getPokemonSelector(evt.owner, _normBenchIdx(evt.benchIdx));
         if (!egSel && ctx.findPokemonSelector && evt.pokemon) egSel = ctx.findPokemonSelector(evt.pokemon);
         if (egSel) {
           ctx.showEnergyPopup(egSel, '+' + (evt.amount || 1) + ' \u26A1');
@@ -459,7 +466,7 @@ var AnimQueue = (function() {
         }
         // Progressively apply energy gain to snapshot state
         if (typeof window !== 'undefined' && window.G) {
-          var egPk = _findPokemonObj(evt.pokemon, evt.owner, evt.benchIdx);
+          var egPk = _findPokemonObj(evt.pokemon, evt.owner, _normBenchIdx(evt.benchIdx));
           if (egPk) egPk.energy = (egPk.energy || 0) + (evt.amount || 1);
         }
         ctx.renderBattle();
@@ -520,7 +527,7 @@ var AnimQueue = (function() {
         if (typeof window !== 'undefined' && window.G && evt.player) {
           var swOwner = window.G.players[evt.player];
           if (swOwner) {
-            var fromBenchIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : null;
+            var fromBenchIdx = _normBenchIdx(evt.benchIdx) >= 0 ? _normBenchIdx(evt.benchIdx) : null;
             if (fromBenchIdx !== null && swOwner.bench[fromBenchIdx]) {
               var incoming = swOwner.bench.splice(fromBenchIdx, 1)[0];
               if (swOwner.active && swOwner.active.hp > 0) swOwner.bench.push(swOwner.active);
@@ -564,8 +571,8 @@ var AnimQueue = (function() {
       case 'play_pokemon':
         ctx.renderBattle();
         // Animate the newly played pokemon entering the field
-        if (evt.player && evt.benchIdx !== undefined) {
-          var ppSel = ctx.getPokemonSelector(evt.player, evt.benchIdx);
+        if (evt.player && _normBenchIdx(evt.benchIdx) >= 0) {
+          var ppSel = ctx.getPokemonSelector(evt.player, _normBenchIdx(evt.benchIdx));
           ctx.animateEl(ppSel, 'pokemon-enter', 500);
         } else if (evt.player) {
           // Might be active slot
@@ -610,7 +617,7 @@ var AnimQueue = (function() {
       // ==========================================================
       case 'discard_item':
         var diSel = null;
-        if (evt.owner) diSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
+        if (evt.owner) diSel = ctx.getPokemonSelector(evt.owner, _normBenchIdx(evt.benchIdx));
         if (!diSel && ctx.findPokemonSelector && evt.pokemon) diSel = ctx.findPokemonSelector(evt.pokemon);
         if (diSel) {
           ctx.animateEl(diSel, 'item-discard', 400);
@@ -719,14 +726,14 @@ var AnimQueue = (function() {
       case 'selfBenchDmg':
         if (ctx.captureHpState) ctx.captureHpState();
         var sbdSel = null;
-        if (evt.owner && evt.benchIdx !== undefined) sbdSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx);
+        if (evt.owner && _normBenchIdx(evt.benchIdx) >= 0) sbdSel = ctx.getPokemonSelector(evt.owner, _normBenchIdx(evt.benchIdx));
         if (!sbdSel && ctx.findPokemonSelector && evt.pokemon) sbdSel = ctx.findPokemonSelector(evt.pokemon);
         if (sbdSel) {
           ctx.showDamagePopupAt(evt.amount, sbdSel, false);
           ctx.animateEl(sbdSel, 'recoil-shake', 400);
         }
         if (typeof window !== 'undefined' && window.G && evt.amount) {
-          var sbdPk = _findPokemonObj(evt.pokemon, evt.owner, evt.benchIdx);
+          var sbdPk = _findPokemonObj(evt.pokemon, evt.owner, _normBenchIdx(evt.benchIdx));
           if (sbdPk) {
             sbdPk.damage = (sbdPk.damage || 0) + evt.amount;
             sbdPk.hp = Math.max(0, sbdPk.maxHp - sbdPk.damage);

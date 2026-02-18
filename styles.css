@@ -116,12 +116,19 @@ button { cursor:pointer; font-family:inherit; }
 /* Card selection & glow effects */
 .field-pokemon.selected-card .fp-img { border-color:#818cf8; box-shadow:0 0 12px rgba(129,140,248,0.5); }
 .field-pokemon.glow-attack .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.35); border-color:rgba(250,204,21,0.4); }
-.field-pokemon.glow-ability .fp-img { box-shadow:0 0 10px rgba(74,222,128,0.35); border-color:rgba(74,222,128,0.45); }
+.field-pokemon.glow-ability .fp-img { box-shadow:0 0 12px rgba(74,222,128,0.45); border-color:rgba(74,222,128,0.5); }
 .field-pokemon.glow-attack.glow-ability .fp-img { box-shadow:0 0 10px rgba(250,204,21,0.3), 0 0 18px rgba(74,222,128,0.25); border-color:rgba(250,204,21,0.4); }
 .field-pokemon.selected-card.glow-attack .fp-img { box-shadow:0 0 14px rgba(250,204,21,0.5); border-color:#fde047; }
 .field-pokemon.selected-card.glow-ability .fp-img { box-shadow:0 0 14px rgba(74,222,128,0.45); border-color:#4ade80; }
 @keyframes glowPulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }
 .field-pokemon.glow-attack .fp-img, .field-pokemon.glow-ability .fp-img { animation:glowPulse 2s ease-in-out infinite; }
+/* Bench ability: stronger glow + pulsing ring to make it very obvious */
+.field-pokemon.bench-slot.glow-ability .fp-img { box-shadow:0 0 14px rgba(74,222,128,0.6), 0 0 28px rgba(74,222,128,0.2); border-color:#4ade80; opacity:1; }
+@keyframes benchAbilityPulse { 0%,100% { box-shadow:0 0 14px rgba(74,222,128,0.6), 0 0 28px rgba(74,222,128,0.2); } 50% { box-shadow:0 0 18px rgba(74,222,128,0.8), 0 0 36px rgba(74,222,128,0.3); } }
+.field-pokemon.bench-slot.glow-ability .fp-img { animation:benchAbilityPulse 1.5s ease-in-out infinite !important; }
+/* "ABILITY" badge on bench pokemon with usable ability */
+.fp-ability-badge { position:absolute; top:-6px; left:50%; transform:translateX(-50%); background:linear-gradient(135deg,#4ade80,#22c55e); color:#000; font-size:8px; font-weight:900; padding:1px 6px; border-radius:6px; letter-spacing:0.5px; white-space:nowrap; z-index:6; pointer-events:none; animation:abilityBadgePulse 2s ease-in-out infinite; box-shadow:0 1px 4px rgba(0,0,0,0.3); }
+@keyframes abilityBadgePulse { 0%,100% { opacity:0.85; } 50% { opacity:1; } }
 
 @keyframes pulse { 0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,0.4); } 50% { box-shadow:0 0 0 8px rgba(245,158,11,0); } }
 
