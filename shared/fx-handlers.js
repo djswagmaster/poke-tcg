@@ -178,8 +178,9 @@ register('selfDmg', function(G, ctx, params) {
   var v = params[0] || 0;
   var selfAtk = { baseDmg: v, fx: '' };
   var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, ctx.attacker, selfAtk, ctx.attackerTypes, ctx.currentPlayer);
-  ctx.events.push({ type: 'selfDamage', pokemon: ctx.attacker.name, amount: v, owner: ctx.currentPlayer });
-  ctx.events = ctx.events.concat(result.events);
+  ctx.events.push({ type: 'selfDamage', pokemon: ctx.attacker.name, amount: result.result.damage, owner: ctx.currentPlayer });
+  // Filter out the 'damage' event from pipeline results — selfDamage already shows the damage popup
+  ctx.events = ctx.events.concat(result.events.filter(function(e) { return e.type !== 'damage'; }));
   return null;
 });
 

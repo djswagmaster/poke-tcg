@@ -294,7 +294,8 @@ function endTurn(G) {
       addLog(G, 'Poison deals 10 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', status: 'poison', pokemon: pk.name, damage: 10, owner: side.pNum });
       if (poisonResult.ko) {
-        G.events = G.events.concat(poisonResult.events);
+        // Filter out the statusDamage event — status_tick already shows the damage popup
+        G.events = G.events.concat(poisonResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
       }
     }
 
@@ -304,7 +305,8 @@ function endTurn(G) {
       addLog(G, 'Burn deals 20 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', status: 'burn', pokemon: pk.name, damage: 20, owner: side.pNum });
       if (burnResult.ko) {
-        G.events = G.events.concat(burnResult.events);
+        // Filter out the statusDamage event — status_tick already shows the damage popup
+        G.events = G.events.concat(burnResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
       }
       // Magma Sear: opponent's Magmar forces burn recovery to always fail
       var magmaSearActive = !isPassiveBlocked(G) && _oppHasPassive(G, side.pNum, 'magmaSear');
@@ -321,7 +323,8 @@ function endTurn(G) {
           addLog(G, 'Magma Sear deals 10 to ' + pk.name, 'damage');
           G.events.push({ type: 'ability_effect', ability: 'magmaSear', target: pk.name, damage: 10 });
           if (searResult.ko) {
-            G.events = G.events.concat(searResult.events);
+            // Filter out the statusDamage event — ability_effect already handles the visual
+            G.events = G.events.concat(searResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
           }
         } else {
           addLog(G, pk.name + ' is still Burned (Tails)', 'info');
@@ -686,8 +689,11 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var selfBenchResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, selfBenchAtk, info.attackerTypes, targetPlayer, {
       attackSeq: info.attackSeq
     });
-    G.events.push({ type: 'selfBenchDmg', pokemon: targetPk.name, amount: info.baseDmg, benchIdx: targetBenchIdx, owner: G.currentPlayer });
-    G.events = G.events.concat(selfBenchResult.events);
+    G.events.push({ type: 'selfBenchDmg', pokemon: targetPk.name, amount: selfBenchResult.result.damage, benchIdx: targetBenchIdx, owner: G.currentPlayer });
+    // Filter out the 'damage' event from pipeline results — selfBenchDmg already shows
+    // the damage popup with the correct animation (recoil-shake). Include other events
+    // (itemProc, KO, etc.) so those still fire.
+    G.events = G.events.concat(selfBenchResult.events.filter(function(e) { return e.type !== 'damage'; }));
 
     var selfBenchFx = (info.attack && info.attack.fx) || '';
     var selfBenchRemainFx = selfBenchFx.replace(/selfBenchDmg:\d+/, '').trim();
