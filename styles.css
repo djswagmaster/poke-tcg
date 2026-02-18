@@ -138,7 +138,7 @@ button { cursor:pointer; font-family:inherit; }
 .fp-stats { display:flex; gap:8px; font-size:13px; font-weight:800; }
 .fp-hp-text { color:#ccc; transition:color 0.3s; }
 .fp-energy { color:#f59e0b; transition:all 0.3s; }
-.fp-status { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; animation:statusBadgeIn 0.3s ease-out; }
+.fp-status { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:800; }
 .fp-status.burn { background:#ef4444; color:#fff; }
 .fp-status.poison { background:#a855f7; color:#fff; }
 .fp-status.sleep { background:#6b7280; color:#fff; }
@@ -208,7 +208,7 @@ button { cursor:pointer; font-family:inherit; }
 /* Log */
 .ap-log { width:200px; padding:12px; border-left:1px solid rgba(255,255,255,0.06); overflow-y:auto; }
 .ap-log-title { font-size:9px; font-weight:800; color:#555; letter-spacing:1px; margin-bottom:6px; }
-.log-entry { font-size:10px; color:#888; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.02); animation:logSlideIn 0.2s ease-out; }
+.log-entry { font-size:10px; color:#888; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.02); }
 .log-entry.damage { color:#fca5a5; }
 .log-entry.heal { color:#86efac; }
 .log-entry.ko { color:#ef4444; font-weight:800; }
