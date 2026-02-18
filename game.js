@@ -389,6 +389,7 @@ function clonePokemon(pk) {
   if (c.types) c.types = c.types.slice();
   if (c.weakness) c.weakness = c.weakness.slice();
   if (c.resistance) c.resistance = c.resistance.slice();
+  if (c.heldItems) c.heldItems = c.heldItems.slice();
   return c;
 }
 
@@ -561,10 +562,10 @@ function selectBenchForRetreat(idx) {
   dispatchAction({ type: 'selectBenchForRetreat', benchIdx: idx, _playerNum: pr.player });
 }
 
-function discardHeldItem(slot, benchIdx) {
+function discardHeldItem(slot, benchIdx, itemName) {
   if (G.animating) return;
-  if (isOnline) { sendAction({ actionType: 'discardItem', slot, benchIdx }); return; }
-  dispatchAction({ type: 'discardItem', slot, benchIdx });
+  if (isOnline) { sendAction({ actionType: 'discardItem', slot, benchIdx, itemName: itemName || undefined }); return; }
+  dispatchAction({ type: 'discardItem', slot, benchIdx, itemName: itemName || undefined });
 }
 
 function selectTarget(playerNum, benchIdx) {
@@ -608,7 +609,13 @@ function actionPlayPokemon(handIdx) {
   const itemsInHand = myP.hand.filter(c => c.type === 'items');
   if (itemsInHand.length > 0 && !card.heldItem && !G.pendingPlayPokemon) {
     G.pendingPlayPokemon = { handIdx };
-    renderItemAttachPrompt(handIdx, itemsInHand);
+    // Check if this Pokemon has the Keyring ability (Klefki) — allows up to 3 items
+    const pokeData = getPokemonData(card.name);
+    if (pokeData && pokeData.ability && pokeData.ability.key === 'keyring') {
+      renderKeyringItemPrompt(handIdx, itemsInHand);
+    } else {
+      renderItemAttachPrompt(handIdx, itemsInHand);
+    }
     return;
   }
   if (isOnline) {
@@ -630,6 +637,65 @@ function renderItemAttachPrompt(handIdx, items) {
   html += '<button class="ap-btn ap-btn-end" onclick="finishPlayPokemon(' + handIdx + ', null)">' +
     '<span class="atk-name">No Item</span></button>';
   panel.innerHTML = html;
+}
+
+// Keyring multi-item select: toggle up to 3 items, then confirm
+var _keyringSelected = [];
+function renderKeyringItemPrompt(handIdx, items) {
+  _keyringSelected = [];
+  const panel = document.getElementById('apActions');
+  const myP = isOnline ? me() : cp();
+  _renderKeyringButtons(handIdx, items, myP, panel);
+}
+
+function _renderKeyringButtons(handIdx, items, myP, panel) {
+  const maxItems = 3;
+  let html = `<div class="ap-section-label" style="color:#a855f7">KEYRING: ATTACH UP TO 3 ITEMS (` + _keyringSelected.length + `/` + maxItems + `)</div>`;
+  items.forEach((item) => {
+    const realIdx = myP.hand.indexOf(item);
+    const isSelected = _keyringSelected.indexOf(realIdx) !== -1;
+    const atMax = _keyringSelected.length >= maxItems && !isSelected;
+    const cls = isSelected ? 'ap-btn ap-btn-ability' : 'ap-btn ap-btn-end';
+    const style = isSelected ? ' style="border:2px solid #a855f7;box-shadow:0 0 8px #a855f7"' : (atMax ? ' style="opacity:0.4"' : '');
+    html += '<button class="' + cls + '"' + style + ' onclick="toggleKeyringItem(' + handIdx + ', ' + realIdx + ')">' +
+      '<span class="atk-name">' + (isSelected ? '✓ ' : '') + item.name + '</span></button>';
+  });
+  html += '<button class="ap-btn ap-btn-end" style="margin-top:6px;border:2px solid #22c55e" onclick="confirmKeyringItems(' + handIdx + ')">' +
+    '<span class="atk-name">' + (_keyringSelected.length > 0 ? 'Confirm (' + _keyringSelected.length + ' item' + (_keyringSelected.length > 1 ? 's' : '') + ')' : 'No Items') + '</span></button>';
+  panel.innerHTML = html;
+}
+
+function toggleKeyringItem(handIdx, itemIdx) {
+  if (G.animating) return;
+  const pos = _keyringSelected.indexOf(itemIdx);
+  if (pos !== -1) {
+    _keyringSelected.splice(pos, 1);
+  } else if (_keyringSelected.length < 3) {
+    _keyringSelected.push(itemIdx);
+  }
+  const myP = isOnline ? me() : cp();
+  const items = myP.hand.filter(c => c.type === 'items');
+  const panel = document.getElementById('apActions');
+  _renderKeyringButtons(handIdx, items, myP, panel);
+}
+
+function confirmKeyringItems(handIdx) {
+  if (G.animating) return;
+  G.pendingPlayPokemon = null;
+  if (_keyringSelected.length === 0) {
+    // No items selected
+    finishPlayPokemon(handIdx, null);
+  } else {
+    // First selected item is the primary, rest are extras
+    const primary = _keyringSelected[0];
+    const extras = _keyringSelected.slice(1);
+    if (isOnline) {
+      sendAction({ actionType: 'playPokemon', handIdx, itemHandIdx: primary, extraItemIndices: extras.length > 0 ? extras : undefined });
+    } else {
+      dispatchAction({ type: 'playPokemon', handIdx, itemHandIdx: primary, extraItemIndices: extras.length > 0 ? extras : undefined });
+    }
+  }
+  _keyringSelected = [];
 }
 
 function finishPlayPokemon(handIdx, itemHandIdx) {
@@ -1187,7 +1253,7 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   return `<div class="field-pokemon ${slotClass} ${glowClass} ${selectedClass}">
     <div class="fp-img-wrap">
       <img class="fp-img ${imgClass}" src="${getImg(pk.name)}" alt="${pk.name}" ${clickAction}>
-      ${pk.heldItem ? `<img class="fp-held-item" src="${getImg(pk.heldItem)}" alt="${pk.heldItem}" title="${pk.heldItem}" onclick="event.stopPropagation();zoomCard('${pk.heldItem.replace(/'/g,"\\'")}')" style="cursor:pointer">` : ''}
+      ${(pk.heldItems && pk.heldItems.length > 0 ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : [])).map((hi, hiIdx) => `<img class="fp-held-item" src="${getImg(hi)}" alt="${hi}" title="${hi}" onclick="event.stopPropagation();zoomCard('${hi.replace(/'/g,"\\'")}')" style="cursor:pointer;${hiIdx > 0 ? 'right:' + (4 + hiIdx * 14) + 'px' : ''}">`).join('')}
     </div>
     <div class="fp-info">
       <div class="fp-name">${pk.name}</div>
@@ -1258,16 +1324,17 @@ function renderActionPanel() {
   const isActive = sel.benchIdx === -1;
 
   // Show card info (always)
-  const discardBtn = isMine && selPk.heldItem
-    ? `<button onclick="discardHeldItem('${isActive ? 'active' : 'bench'}',${isActive ? null : sel.benchIdx})" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button>`
-    : '';
+  const allItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
   const zoomBtn = `<button onclick="zoomCard('${selPk.name.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(129,140,248,0.3);color:#a5b4fc;border:1px solid rgba(129,140,248,0.3);border-radius:4px;padding:2px 8px;cursor:pointer;margin-left:6px">🔍 View</button>`;
-  const itemZoomBtn = selPk.heldItem ? `<button onclick="zoomCard('${selPk.heldItem.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(168,85,247,0.2);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">🔍</button>` : '';
+  const itemsHtml = allItems.length > 0 ? allItems.map(hi => {
+    const izBtn = `<button onclick="zoomCard('${hi.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(168,85,247,0.2);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">🔍</button>`;
+    return `<span style="margin-right:6px">🎒 ${hi} ${izBtn}</span>`;
+  }).join('') : '';
   info.innerHTML = `
     <div class="ap-pokemon-name">${selPk.name}${!isMine ? ' <span style="color:#ef4444;font-size:10px">(Enemy)</span>' : ''} ${zoomBtn}</div>
     <div class="ap-pokemon-types">${selData.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
     <div class="ap-pokemon-hp">HP: ${selPk.hp}/${selPk.maxHp} | Energy: ${selPk.energy}/5</div>
-    ${selPk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${selPk.heldItem} ${itemZoomBtn} ${discardBtn}</div>` : ''}
+    ${itemsHtml ? `<div style="font-size:10px;color:#a855f7">${itemsHtml}</div>` : ''}
     ${selPk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${selPk.status.join(', ')}</div>` : ''}
     ${selData.ability ? `<div style="font-size:10px;color:#c4b5fd">✦ ${selData.ability.name}: ${selData.ability.desc} <span style="opacity:0.6">[${selData.ability.type}]</span></div>` : ''}
     <div style="font-size:10px;color:#888;margin-top:2px">${selData.attacks.map(a => `${a.name} (${a.energy}⚡${a.baseDmg ? ', ' + a.baseDmg + 'dmg' : ''})`).join(' · ')}</div>
@@ -1406,7 +1473,8 @@ function renderActionPanel() {
 
     // Retreat
     html += '<div class="ap-section-label">MOVEMENT</div>';
-    const qrCost = pk.heldItem === 'Float Stone' ? 1 : 2;
+    const pkAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    const qrCost = pkAllItems.indexOf('Float Stone') !== -1 ? 1 : 2;
     html += `<button class="ap-btn ap-btn-retreat" onclick="actionQuickRetreat()" ${me.bench.length > 0 && pk.energy >= qrCost ? '' : 'disabled'}>
       <span class="atk-name">Quick Retreat</span><span class="atk-detail">${qrCost} energy, don't end turn</span>
     </button>`;
@@ -1415,11 +1483,14 @@ function renderActionPanel() {
     </button>`;
 
     // Held item discard
-    if (pk.heldItem) {
-      html += '<div class="ap-section-label">ITEM</div>';
-      html += `<button class="ap-btn" onclick="discardHeldItem('active',null)" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${pk.heldItem}</span><span class="atk-detail">Click to discard</span>
-      </button>`;
+    const activeAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    if (activeAllItems.length > 0) {
+      html += '<div class="ap-section-label">ITEM' + (activeAllItems.length > 1 ? 'S' : '') + '</div>';
+      activeAllItems.forEach(hi => {
+        html += `<button class="ap-btn" onclick="discardHeldItem('active',null,'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
+        </button>`;
+      });
     }
   }
   // === MY BENCH POKEMON SELECTED ===
@@ -1456,11 +1527,14 @@ function renderActionPanel() {
     }
 
     // Held item discard
-    if (selPk.heldItem) {
-      html += '<div class="ap-section-label">ITEM</div>';
-      html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx})" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${selPk.heldItem}</span><span class="atk-detail">Click to discard</span>
-      </button>`;
+    const benchAllItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
+    if (benchAllItems.length > 0) {
+      html += '<div class="ap-section-label">ITEM' + (benchAllItems.length > 1 ? 'S' : '') + '</div>';
+      benchAllItems.forEach(hi => {
+        html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx},'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
+        </button>`;
+      });
     }
 
     // Show attacks (info-only, can't use from bench)

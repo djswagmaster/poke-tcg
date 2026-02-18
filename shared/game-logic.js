@@ -96,6 +96,23 @@ function makePokemon(name, heldItem) {
   };
 }
 
+// Apply a bonus held item to a Pokemon (used by Klefki's Keyring ability).
+// The primary item is already applied via makePokemon; this handles extras.
+function applyExtraItem(pk, itemName, data) {
+  if (itemName === 'Health Charm') {
+    pk.baseMaxHp += 50; pk.maxHp += 50; pk.hp += 50;
+  } else if (itemName === 'Power Herb') {
+    pk.energy = Math.min(Constants.MAX_ENERGY, pk.energy + 1);
+  } else if (itemName === 'Quick Claw') {
+    pk.quickClawActive = true;
+  } else if (itemName === 'Eviolite' && data && data.cost <= 3) {
+    var bonus = (4 - data.cost) * 10;
+    pk.baseMaxHp += bonus; pk.maxHp += bonus; pk.hp += bonus;
+  }
+  // Other items (reactive/proc-based) are tracked in pk.heldItems
+  // and checked at hook sites via getHeldItems()
+}
+
 // ============================================================
 // GAME STATE FACTORY
 // ============================================================
@@ -127,6 +144,11 @@ function runOnPlayAbility(G, playerNum, pk) {
     p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 1;
     addLog(G, pk.name + ' expands your bench capacity by 1!', 'effect');
     G.events.push({ type: 'ability_effect', ability: 'dimensionExpansion', pokemon: pk.name, player: playerNum, maxBench: p.maxBench });
+  }
+  // Keyring (Klefki): item attachment is handled by doPlayPokemon via extraItemIndices
+  if (data.ability.key === 'keyring' && pk.heldItems && pk.heldItems.length > 1) {
+    addLog(G, 'Keyring: ' + pk.name + ' attached ' + pk.heldItems.length + ' items!', 'effect');
+    G.events.push({ type: 'ability_effect', ability: 'keyring', pokemon: pk.name, player: playerNum, items: pk.heldItems });
   }
 }
 
@@ -544,6 +566,22 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
 
 function finalizeAttack(G, attacker) {
   if (attacker) attacker.attackedThisTurn = true;
+
+  // Swift Strikes: gain +1 energy whenever this Pokemon attacks
+  if (attacker && attacker.hp > 0 && !isPassiveBlocked(G)) {
+    var atkData = PokemonDB.getPokemonData(attacker.name);
+    if (atkData && atkData.ability && atkData.ability.key === 'swiftStrikes') {
+      var beforeE = attacker.energy;
+      attacker.energy = Math.min(Constants.MAX_ENERGY, attacker.energy + 1);
+      var gained = attacker.energy - beforeE;
+      if (gained > 0) {
+        addLog(G, 'Swift Strikes: ' + attacker.name + ' gained 1 energy!', 'effect');
+        G.events.push({ type: 'energyGain', pokemon: attacker.name, amount: 1, source: 'swiftStrikes' });
+        triggerHealingScarf(G, attacker);
+      }
+    }
+  }
+
   if (attacker && attacker.hp <= 0) {
     var koEvents = DamagePipeline.handleKO(G, attacker, G.currentPlayer);
     G.events = G.events.concat(koEvents);
@@ -855,7 +893,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
 }
 
 // --- Play Pokemon from Hand ---
-function doPlayPokemon(G, handIdx, itemHandIdx) {
+function doPlayPokemon(G, handIdx, itemHandIdx, extraItemIndices) {
   _deps();
   var p = cp(G);
   var card = p.hand[handIdx];
@@ -864,31 +902,54 @@ function doPlayPokemon(G, handIdx, itemHandIdx) {
   if (p.mana < data.cost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
 
   var heldItem = card.heldItem || null;
+  // Collect all indices to remove (sorted descending so splicing doesn't shift)
+  var indicesToRemove = [handIdx];
+
   // Attach item from hand
   if (itemHandIdx !== null && itemHandIdx !== undefined) {
     var itemCard = p.hand[itemHandIdx];
     if (itemCard && itemCard.type === 'items') {
       heldItem = itemCard.name;
-      if (itemHandIdx > handIdx) {
-        p.hand.splice(itemHandIdx, 1);
-        p.hand.splice(handIdx, 1);
-      } else {
-        p.hand.splice(handIdx, 1);
-        p.hand.splice(itemHandIdx, 1);
-      }
-    } else {
-      p.hand.splice(handIdx, 1);
+      indicesToRemove.push(itemHandIdx);
     }
-  } else {
-    p.hand.splice(handIdx, 1);
+  }
+
+  // Keyring: Klefki can attach up to 3 items total
+  var extraItems = [];
+  if (extraItemIndices && extraItemIndices.length > 0) {
+    for (var ei = 0; ei < extraItemIndices.length; ei++) {
+      var eiIdx = extraItemIndices[ei];
+      var eiCard = p.hand[eiIdx];
+      if (eiCard && eiCard.type === 'items' && indicesToRemove.indexOf(eiIdx) === -1) {
+        extraItems.push(eiCard.name);
+        indicesToRemove.push(eiIdx);
+      }
+    }
+  }
+
+  // Remove cards from hand (descending order to preserve indices)
+  indicesToRemove.sort(function(a, b) { return b - a; });
+  for (var ri = 0; ri < indicesToRemove.length; ri++) {
+    p.hand.splice(indicesToRemove[ri], 1);
   }
 
   p.mana -= data.cost;
   var pk = makePokemon(card.name, heldItem);
+
+  // Apply extra Keyring items
+  if (extraItems.length > 0) {
+    pk.heldItems = [heldItem].concat(extraItems).filter(Boolean);
+    for (var xi = 0; xi < extraItems.length; xi++) {
+      applyExtraItem(pk, extraItems[xi], data);
+    }
+  }
+
   p.bench.push(pk);
   runOnPlayAbility(G, G.currentPlayer, pk);
-  addLog(G, 'Played ' + pk.name + (heldItem ? ' with ' + heldItem : '') + ' to bench', 'info');
-  G.events.push({ type: 'play_pokemon', pokemon: pk.name, heldItem: heldItem, player: G.currentPlayer });
+  var itemDesc = heldItem ? ' with ' + heldItem : '';
+  if (extraItems.length > 0) itemDesc += ' + ' + extraItems.join(', ');
+  addLog(G, 'Played ' + pk.name + itemDesc + ' to bench', 'info');
+  G.events.push({ type: 'play_pokemon', pokemon: pk.name, heldItem: heldItem, extraItems: extraItems, player: G.currentPlayer });
 
   // Shedinja: on-play strip energy
   if (data.ability && data.ability.key === 'soulDrain' && data.ability.type === 'onPlay') {
@@ -1191,13 +1252,34 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 }
 
 // --- Discard Held Item ---
-function doDiscardItem(G, slot, benchIdx) {
+function doDiscardItem(G, slot, benchIdx, itemName) {
   var p = cp(G);
   var pk = slot === 'active' ? p.active : p.bench[benchIdx];
-  if (!pk || !pk.heldItem) return false;
-  addLog(G, 'Discarded ' + pk.heldItem + ' from ' + pk.name, 'info');
-  G.events.push({ type: 'discard_item', pokemon: pk.name, item: pk.heldItem });
+  if (!pk) return false;
+  // If itemName specified, discard that specific item from heldItems array
+  if (itemName && pk.heldItems && pk.heldItems.length > 0) {
+    var idx = pk.heldItems.indexOf(itemName);
+    if (idx === -1) return false;
+    pk.heldItems.splice(idx, 1);
+    addLog(G, 'Discarded ' + itemName + ' from ' + pk.name, 'info');
+    G.events.push({ type: 'discard_item', pokemon: pk.name, item: itemName });
+    // If this was also the primary heldItem, update it
+    if (pk.heldItem === itemName) {
+      pk.heldItem = pk.heldItems.length > 0 ? pk.heldItems[0] : null;
+    }
+    return true;
+  }
+  // Default: discard primary heldItem
+  if (!pk.heldItem) return false;
+  var discarded = pk.heldItem;
+  addLog(G, 'Discarded ' + discarded + ' from ' + pk.name, 'info');
+  G.events.push({ type: 'discard_item', pokemon: pk.name, item: discarded });
   pk.heldItem = null;
+  if (pk.heldItems) {
+    var hIdx = pk.heldItems.indexOf(discarded);
+    if (hIdx !== -1) pk.heldItems.splice(hIdx, 1);
+    if (pk.heldItems.length > 0) pk.heldItem = pk.heldItems[0];
+  }
   return true;
 }
 
@@ -1517,9 +1599,9 @@ function processAction(G, playerNum, action) {
     case 'retreat': return finish(doRetreat(G));
     case 'quickRetreat': return finish(doQuickRetreat(G));
     case 'grantEnergy': return finish(doGrantEnergy(G, action.targetSlot, action.benchIdx));
-    case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx));
+    case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx, action.extraItemIndices));
     case 'useAbility': return finish(doUseAbility(G, action.key, action.sourceBenchIdx));
-    case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx));
+    case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx, action.itemName));
     case 'cancelTargeting': return finish(doCancelTargeting(G));
     case 'endTurn': return finish(doEndTurnAction(G));
     default: return finish(false);

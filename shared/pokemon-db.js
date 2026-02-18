@@ -146,9 +146,17 @@ var POKEMON_DB = [
     ability:{name:"Befuddling Melody",desc:"Confuse Opp Active",type:"active",key:"lullaby"},
     attacks:[{name:"Excited Buzz",energy:1,baseDmg:30,desc:"+10 per own energy",fx:"scaleOwn:10"}]},
 
+  {name:"Klefki",types:["Fairy","Steel"],cost:4,hp:200,weakness:["Fire"],resistance:["Dragon"],
+    ability:{name:"Keyring",desc:"When you put this Pokemon into play, you may attach up to 3 Held Items to it",type:"onPlay",key:"keyring"},
+    attacks:[{name:"Fairy Wind",energy:3,baseDmg:70,desc:"",fx:""}]},
+
   {name:"Kyogre",types:["Water"],cost:6,hp:300,weakness:["Electric"],resistance:["Fire"],
     attacks:[{name:"Aqua Boost",energy:2,baseDmg:60,desc:"+1 energy",fx:"selfEnergy:1"},
              {name:"Origin Pulse",energy:4,baseDmg:120,desc:"+20 each opp bench",fx:"oppBenchDmg:20"}]},
+
+  {name:"Ledian",types:["Bug","Flying"],cost:3,hp:210,weakness:["Water","Ice"],resistance:["Fire","Ground"],
+    ability:{name:"Swift Strikes",desc:"Whenever this Pokemon attacks, it gains +1 Energy",type:"passive",key:"swiftStrikes"},
+    attacks:[{name:"Five Star Punch",energy:2,baseDmg:50,desc:"If exactly 5 Energy: +50 damage",fx:"maxEnergyBonus:50"}]},
 
   {name:"Lucario",types:["Fighting","Steel"],cost:4,hp:180,weakness:["Flying","Psychic"],resistance:["Poison","Rock"],
     attacks:[{name:"Jet Jab",energy:1,baseDmg:60,desc:"Ignores resistance",fx:"ignoreRes"},
@@ -223,6 +231,9 @@ var POKEMON_DB = [
   {name:"Palkia",types:["Water","Dragon"],cost:6,hp:280,weakness:["Electric","Dragon"],resistance:["Fire","Grass"],
     ability:{name:"Dimension Expansion",desc:"On play: permanently increase your max bench size by 1",type:"onPlay",key:"dimensionExpansion"},
     attacks:[{name:"Spacial Rend",energy:4,baseDmg:100,desc:"Damage ignores resistance/reduction and defensive effects",fx:"ignoreReduction"}]},
+
+  {name:"Porygon2",types:["Normal"],cost:4,hp:220,weakness:[],resistance:["Ghost"],
+    attacks:[{name:"Power of 2",energy:2,baseDmg:0,desc:"Double your current Mana",fx:"doubleMana"}]},
 
   {name:"Psyduck",types:["Water"],cost:2,hp:140,weakness:["Electric"],resistance:["Fire"],
     attacks:[{name:"Confusion Wave",energy:2,baseDmg:60,desc:"Both actives confused",fx:"confuseBoth"}]},

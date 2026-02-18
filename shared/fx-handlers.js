@@ -638,6 +638,15 @@ function processPreDamageEffects(G, fx, attacker, currentPlayer) {
     events.push({ type: 'manaGain', player: currentPlayer, amount: v });
   }
 
+  if (fx.indexOf('doubleMana') !== -1) {
+    var beforeMana = p.mana;
+    p.mana = Math.min(Constants.MAX_MANA, p.mana * 2);
+    var manaGained = p.mana - beforeMana;
+    if (manaGained > 0) {
+      events.push({ type: 'manaGain', player: currentPlayer, amount: manaGained });
+    }
+  }
+
   if (fx.indexOf('benchEnergyAll') !== -1) {
     p.bench.forEach(function(pk, i) {
       if (pk.energy < Constants.MAX_ENERGY) {
