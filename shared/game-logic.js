@@ -543,9 +543,26 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   var preEvents = FXHandlers.processPreDamageEffects(G, fx, attacker, G.currentPlayer);
   G.events = G.events.concat(preEvents);
 
+  // Handle optBoost: add boost damage to base attack and deduct energy BEFORE dealing damage
+  // so it's a single combined hit, not two separate ones.
+  var effectiveAttack = attack;
+  if (useOptBoost && fx.indexOf('optBoost:') !== -1) {
+    var optParts = fx.split('optBoost:')[1].split(':');
+    var optExtraDmg = parseInt(optParts[0]) || 0;
+    var optEnergyCost = parseInt(optParts[1]) || 0;
+    var actualOptCost = Math.min(optEnergyCost, attacker.energy);
+    attacker.energy -= actualOptCost;
+    if (actualOptCost > 0) {
+      G.events.push({ type: 'selfEnergyLoss', pokemon: attacker.name, amount: actualOptCost, owner: G.currentPlayer });
+      addLog(G, attacker.name + ' spends ' + actualOptCost + ' energy for boost!', 'effect');
+    }
+    // Create a modified attack with combined damage
+    effectiveAttack = { name: attack.name, energy: attack.energy, baseDmg: attack.baseDmg + optExtraDmg, fx: attack.fx, desc: attack.desc };
+  }
+
   // Snipe targeting (hit any Pokemon)
   if (fx.indexOf('snipe') !== -1 && fx.indexOf('sniperBench') === -1 && fx.indexOf('swarmSnipe') === -1) {
-    var snipeResult = FXHandlers.processAll(G, 'snipe', attacker, defender, attack, useOptBoost);
+    var snipeResult = FXHandlers.processAll(G, 'snipe', attacker, defender, effectiveAttack, useOptBoost);
     if (snipeResult.signal === 'pendingTarget') {
       G.targeting = { type: snipeResult.targetingInfo.type, validTargets: snipeResult.targetingInfo.validTargets, attackInfo: snipeResult.targetingInfo };
       G.targeting.attackInfo.attackSeq = attackSeq;
@@ -557,9 +574,9 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   if (!defender) return;
 
   // Main damage
-  var needsDmg = attack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
+  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
   if (needsDmg) {
-    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, attack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
+    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, effectiveAttack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
     G.events = G.events.concat(damageResult.events);
 
     if (damageResult.result.mult > 1) addLog(G, 'Super Effective!', 'effect');
@@ -569,8 +586,9 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
     }
   }
 
-  // Process remaining FX (post-damage effects)
-  var fxResult = FXHandlers.processAll(G, fx, attacker, defender, attack, useOptBoost);
+  // Process remaining FX (post-damage effects) — optBoost is already handled above,
+  // so the FX handler will see useOptBoost=false to avoid double-processing.
+  var fxResult = FXHandlers.processAll(G, fx, attacker, defender, effectiveAttack, false);
   G.events = G.events.concat(fxResult.events);
 
   if (fxResult.signal === 'pendingTarget') {

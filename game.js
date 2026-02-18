@@ -531,9 +531,8 @@ async function actionAttack(attackIndex, forceOptBoost = null) {
 
   // Choice-based attacks (e.g. optBoost) are selected from separate buttons
   // in the action panel; no blocking confirm() popup.
-  const opt = getOptBoostMeta(attack);
+  // Boost always proceeds — server will subtract min(energyCost, currentEnergy).
   let useOptBoost = forceOptBoost === true;
-  if (opt && useOptBoost && attacker.energy < opt.energyCost) useOptBoost = false;
 
   if (isOnline) {
     sendAction({ actionType: 'attack', attackIndex, useOptBoost });
@@ -1471,11 +1470,10 @@ function renderActionPanel() {
 
       const opt = getOptBoostMeta(atk);
       if (opt) {
-        // Energy is a threshold, not consumed by the base attack.
-        // The boost only deducts opt.energyCost from current energy.
-        const canUseBoost = canUse && pk.energy >= opt.energyCost;
-        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-          <span class="atk-name">${atk.name} ★ Boost${dmgLabel ? ` (+${opt.extraDmg})` : ''}</span>
+        // Boost has same usability as base attack — it subtracts up to energyCost
+        // from current energy (capped at what you have), adding extra damage.
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+          <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
           <span class="atk-detail">${costLabel} (−${opt.energyCost}⚡) | ${atk.desc || ''}</span>
         </button>`;
       }
@@ -1497,9 +1495,8 @@ function renderActionPanel() {
           </button>`;
           const opt = getOptBoostMeta(atk);
           if (opt) {
-            const canUseBoost = canUse && pk.energy >= opt.energyCost;
-            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-              <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+              <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
               <span class="atk-detail">${cCostLabel} (−${opt.energyCost}⚡) | from ${benchPk.name}</span>
             </button>`;
           }
@@ -1523,9 +1520,8 @@ function renderActionPanel() {
         </button>`;
         const opt = getOptBoostMeta(atk);
         if (opt) {
-          const canUseBoost = canUse && pk.energy >= opt.energyCost;
-          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-            <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+            <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
             <span class="atk-detail">${dCostLabel} (−${opt.energyCost}⚡) | from ${op().active.name}</span>
           </button>`;
         }
