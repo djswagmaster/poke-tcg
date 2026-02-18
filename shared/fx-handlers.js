@@ -110,7 +110,7 @@ register('poison', function(G, ctx, params) {
   if (ctx.defender.heldItem === 'Protect Goggles') return null;
   if (ctx.defender.status.indexOf('poison') !== -1) return null;
   ctx.defender.status.push('poison');
-  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'poison', source: ctx.attack.name });
+  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'poison', source: ctx.attack.name, owner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -122,7 +122,7 @@ register('burn', function(G, ctx, params) {
   var fx = ctx.attack.fx || '';
   if (fx === 'hexBurn') return null;
   ctx.defender.status.push('burn');
-  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'burn', source: ctx.attack.name });
+  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'burn', source: ctx.attack.name, owner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -131,7 +131,7 @@ register('sleep', function(G, ctx, params) {
   if (ctx.defender.heldItem === 'Protect Goggles') return null;
   if (ctx.defender.status.indexOf('sleep') !== -1) return null;
   ctx.defender.status.push('sleep');
-  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'sleep', source: ctx.attack.name });
+  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'sleep', source: ctx.attack.name, owner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -140,7 +140,7 @@ register('confuse', function(G, ctx, params) {
   if (ctx.defender.heldItem === 'Protect Goggles') return null;
   if (ctx.defender.status.indexOf('confusion') !== -1) return null;
   ctx.defender.status.push('confusion');
-  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'confusion', source: ctx.attack.name });
+  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'confusion', source: ctx.attack.name, owner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -168,7 +168,7 @@ register('stripEnergy', function(G, ctx, params) {
   }
 
   ctx.defender.energy = Math.max(0, ctx.defender.energy - actual);
-  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual });
+  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual, targetOwner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -178,7 +178,7 @@ register('selfDmg', function(G, ctx, params) {
   var v = params[0] || 0;
   var selfAtk = { baseDmg: v, fx: '' };
   var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, ctx.attacker, selfAtk, ctx.attackerTypes, ctx.currentPlayer);
-  ctx.events.push({ type: 'selfDamage', pokemon: ctx.attacker.name, amount: v });
+  ctx.events.push({ type: 'selfDamage', pokemon: ctx.attacker.name, amount: v, owner: ctx.currentPlayer });
   ctx.events = ctx.events.concat(result.events);
   return null;
 });
@@ -205,7 +205,7 @@ register('selfEnergyLoss', function(G, ctx, params) {
   }
 
   ctx.attacker.energy = Math.max(0, ctx.attacker.energy - v);
-  ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: v });
+  ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: v, owner: ctx.currentPlayer });
   return null;
 });
 
@@ -236,7 +236,7 @@ register('selfVuln', function(G, ctx, params) {
 register('selfSleep', function(G, ctx, params) {
   if (ctx.attacker.status.indexOf('sleep') === -1) {
     ctx.attacker.status.push('sleep');
-    ctx.events.push({ type: 'statusApplied', pokemon: ctx.attacker.name, status: 'sleep', source: 'self' });
+    ctx.events.push({ type: 'statusApplied', pokemon: ctx.attacker.name, status: 'sleep', source: 'self', owner: ctx.currentPlayer });
   }
   return null;
 });
@@ -435,7 +435,7 @@ register('hexBurn', function(G, ctx, params) {
   if (ctx.defender.status.length > 0 && ctx.defender.heldItem !== 'Protect Goggles') {
     if (ctx.defender.status.indexOf('burn') === -1) {
       ctx.defender.status.push('burn');
-      ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'burn', source: 'Hex Burn' });
+      ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'burn', source: 'Hex Burn', owner: ctx.oppPlayerNum });
     }
   }
   return null;
@@ -445,11 +445,11 @@ register('hexBurn', function(G, ctx, params) {
 register('confuseBoth', function(G, ctx, params) {
   if (ctx.attacker.hp > 0 && ctx.attacker.heldItem !== 'Protect Goggles' && ctx.attacker.status.indexOf('confusion') === -1) {
     ctx.attacker.status.push('confusion');
-    ctx.events.push({ type: 'statusApplied', pokemon: ctx.attacker.name, status: 'confusion', source: 'Confusion Wave' });
+    ctx.events.push({ type: 'statusApplied', pokemon: ctx.attacker.name, status: 'confusion', source: 'Confusion Wave', owner: ctx.currentPlayer });
   }
   if (ctx.defender && ctx.defender.hp > 0 && ctx.defender.heldItem !== 'Protect Goggles' && ctx.defender.status.indexOf('confusion') === -1) {
     ctx.defender.status.push('confusion');
-    ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'confusion', source: 'Confusion Wave' });
+    ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'confusion', source: 'Confusion Wave', owner: ctx.oppPlayerNum });
   }
   return null;
 });
@@ -668,7 +668,7 @@ function processPreDamageEffects(G, fx, attacker, currentPlayer) {
       events.push({ type: 'itemProc', item: 'Healing Scarf', pokemon: attacker.name, effect: 'heal', amount: heal });
     }
 
-    events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: 'selfEnergy' });
+    events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: 'selfEnergy', owner: currentPlayer });
   }
 
   if (fx.indexOf('gainMana:') !== -1) {
@@ -690,7 +690,7 @@ function processPreDamageEffects(G, fx, attacker, currentPlayer) {
     p.bench.forEach(function(pk, i) {
       if (pk.energy < Constants.MAX_ENERGY) {
         pk.energy++;
-        events.push({ type: 'energyGain', pokemon: pk.name, amount: 1, source: 'benchEnergyAll', benchIdx: i });
+        events.push({ type: 'energyGain', pokemon: pk.name, amount: 1, source: 'benchEnergyAll', benchIdx: i, owner: currentPlayer });
       }
     });
   }

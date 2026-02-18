@@ -351,9 +351,17 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
   var scorer = G.players[scorerNum];
   scorer.kos++;
 
+  var koIsActive = owner.active === pokemon;
+  var koBenchIdx = -1;
+  if (!koIsActive) {
+    for (var bi = 0; bi < owner.bench.length; bi++) {
+      if (owner.bench[bi] === pokemon) { koBenchIdx = bi; break; }
+    }
+  }
   events.push({
     type: 'ko', pokemon: pokemon.name, owner: ownerPlayerNum,
-    scorerKOs: scorer.kos, scorerName: scorer.name
+    scorerKOs: scorer.kos, scorerName: scorer.name,
+    isActive: koIsActive, benchIdx: koBenchIdx
   });
 
   // Clear card selection if KO'd pokemon was selected
@@ -485,7 +493,7 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
             if (evt.target.status.indexOf(evt.status) === -1) {
               evt.target.status.push(evt.status);
               events.push({
-                type: 'statusApplied', pokemon: evt.target.name, status: evt.status, source: evt.source
+                type: 'statusApplied', pokemon: evt.target.name, status: evt.status, source: evt.source, owner: attackerOwner
               });
             }
           }
@@ -584,7 +592,7 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
           var recoilResult = applyDamage(G, attacker, atkResult.recoil, attackerOwner);
           events.push({
             type: 'recoilDamage', source: atkItems[0], pokemon: attacker.name,
-            amount: atkResult.recoil
+            amount: atkResult.recoil, owner: attackerOwner
           });
           events = events.concat(recoilResult.events);
           if (recoilResult.ko) {
@@ -597,7 +605,7 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
           attacker.energy = Math.min(Constants.MAX_ENERGY, attacker.energy + atkResult.energyGain);
           var gained = attacker.energy - beforeEnergy;
           if (gained > 0) {
-            events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: atkItems[0] });
+            events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: atkItems[0], owner: attackerOwner });
           }
         }
         if (atkResult.lockAttackName) {

@@ -227,7 +227,7 @@ var POKEMON_DB = [
 
   {name:"Muk",types:["Poison"],cost:4,hp:250,weakness:["Ground"],resistance:["Fairy"],
     attacks:[{name:"Nasty Goop",energy:2,baseDmg:10,desc:"Strip 1 energy + Poison",fx:"stripEnergy:1,poison"},
-             {name:"Split Sludge Bomb",energy:3,baseDmg:0,desc:"60 to 2 Pokemon, lose 2 energy",fx:"multiTarget:60:2"}]},
+             {name:"Split Sludge Bomb",energy:4,baseDmg:0,desc:"60 to 2 Pokemon, lose 2 energy",fx:"multiTarget:60:2"}]},
 
   {name:"Obstagoon",types:["Dark","Normal"],cost:4,hp:230,weakness:["Fairy"],resistance:["Ghost","Dark"],
     ability:{name:"Blockade",desc:"Opp Active can't retreat",type:"passive",key:"blockade"},

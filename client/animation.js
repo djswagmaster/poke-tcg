@@ -68,14 +68,33 @@ var AnimQueue = (function() {
   // }
   // ============================================================
 
-  // Helper: find a pokemon object in window.G by name string
-  function _findPokemonObj(name) {
+  // Helper: find a pokemon object in window.G.
+  // Prefer owner+benchIdx when available (precise), fall back to name (legacy).
+  function _findPokemonObj(name, owner, benchIdx) {
     if (typeof window === 'undefined' || !window.G) return null;
+    // Precise lookup: use owner + benchIdx if provided
+    if (owner && window.G.players[owner]) {
+      var p = window.G.players[owner];
+      if (benchIdx !== undefined && benchIdx !== null && benchIdx >= 0) {
+        return p.bench[benchIdx] || null;
+      }
+      // benchIdx === -1 or not provided: try active first
+      if (p.active && (!name || p.active.name === name)) return p.active;
+      // If active is null (KO'd), search bench by name within this owner
+      if (name) {
+        for (var i = 0; i < p.bench.length; i++) {
+          if (p.bench[i] && p.bench[i].name === name) return p.bench[i];
+        }
+      }
+      return null;
+    }
+    // Fallback: search all players by name
+    if (!name) return null;
     for (var pNum = 1; pNum <= 2; pNum++) {
-      var p = window.G.players[pNum];
-      if (p.active && p.active.name === name) return p.active;
-      for (var i = 0; i < p.bench.length; i++) {
-        if (p.bench[i].name === name) return p.bench[i];
+      var pl = window.G.players[pNum];
+      if (pl.active && pl.active.name === name) return pl.active;
+      for (var j = 0; j < pl.bench.length; j++) {
+        if (pl.bench[j] && pl.bench[j].name === name) return pl.bench[j];
       }
     }
     return null;
@@ -147,14 +166,17 @@ var AnimQueue = (function() {
 
       case 'selfDamage':
         if (ctx.captureHpState) ctx.captureHpState();
-        var selfSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#youField .active-slot';
+        var selfSel = null;
+        if (evt.owner) selfSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!selfSel && ctx.findPokemonSelector && evt.pokemon) selfSel = ctx.findPokemonSelector(evt.pokemon);
+        if (!selfSel) selfSel = '#youField .active-slot';
         if (selfSel) {
           ctx.showDamagePopupAt(evt.amount, selfSel, false);
           ctx.animateEl(selfSel, 'hit-shake', 500);
         }
         // Progressively apply self damage
-        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
-          var sdPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var sdPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (sdPk) { sdPk.damage = (sdPk.damage || 0) + evt.amount; sdPk.hp = Math.max(0, sdPk.maxHp - sdPk.damage); }
         }
         ctx.renderBattle();
@@ -185,18 +207,38 @@ var AnimQueue = (function() {
         break;
 
       case 'ko':
-        var koSel = ctx.getPokemonSelector(evt.owner, -1);
+        // Use isActive/benchIdx from event when available (precise), else infer from state
+        var koIsActive = evt.isActive !== undefined ? evt.isActive : true;
+        var koBenchIdx = evt.benchIdx !== undefined ? evt.benchIdx : -1;
+        if (koIsActive === true && koBenchIdx === -1) {
+          // Double check: if active doesn't match name, search bench
+          if (typeof window !== 'undefined' && window.G && evt.owner) {
+            var koCheck = window.G.players[evt.owner];
+            if (!koCheck.active || koCheck.active.name !== evt.pokemon) {
+              for (var ki = 0; ki < koCheck.bench.length; ki++) {
+                if (koCheck.bench[ki] && koCheck.bench[ki].name === evt.pokemon && koCheck.bench[ki].hp <= 0) {
+                  koIsActive = false; koBenchIdx = ki; break;
+                }
+              }
+            }
+          }
+        }
+        var koSel = ctx.getPokemonSelector(evt.owner, koIsActive ? -1 : koBenchIdx);
         ctx.animateEl(koSel, 'ko-fall', 600);
         ctx.spawnParticlesAtEl(koSel, '#ef4444', 20, { spread: 70, size: 4 });
         await ctx.delay(600);
         // Remove the KO'd pokemon from snapshot state so re-render shows it gone
         if (typeof window !== 'undefined' && window.G && evt.owner) {
           var koOwner = window.G.players[evt.owner];
-          if (koOwner.active && koOwner.active.name === evt.pokemon) {
+          if (koIsActive && koOwner.active) {
+            koOwner.active = null;
+          } else if (!koIsActive && koBenchIdx >= 0 && koOwner.bench[koBenchIdx]) {
+            koOwner.bench.splice(koBenchIdx, 1);
+          } else if (koOwner.active && koOwner.active.name === evt.pokemon) {
             koOwner.active = null;
           } else {
-            var koBIdx = koOwner.bench.findIndex(function(p) { return p.name === evt.pokemon; });
-            if (koBIdx >= 0) koOwner.bench.splice(koBIdx, 1);
+            var koFallbackIdx = koOwner.bench.findIndex(function(p) { return p && p.name === evt.pokemon; });
+            if (koFallbackIdx >= 0) koOwner.bench.splice(koFallbackIdx, 1);
           }
           // Update KO counter
           var scorerNum = evt.owner === 1 ? 2 : 1;
@@ -209,15 +251,18 @@ var AnimQueue = (function() {
         break;
 
       case 'statusApplied':
-        var statApplySel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#oppField .active-slot';
+        var statApplySel = null;
+        if (evt.owner) statApplySel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!statApplySel && ctx.findPokemonSelector && evt.pokemon) statApplySel = ctx.findPokemonSelector(evt.pokemon);
+        if (!statApplySel) statApplySel = '#oppField .active-slot';
         var statColor = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
         if (statApplySel) {
           ctx.animateEl(statApplySel, 'status-apply', 500);
           ctx.spawnParticlesAtEl(statApplySel, statColor[evt.status] || '#999', 10, { spread: 40 });
         }
         // Progressively apply status to snapshot state
-        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.status) {
-          var saPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G && evt.status) {
+          var saPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (saPk && saPk.status) {
             if (saPk.status.indexOf(evt.status) === -1) saPk.status.push(evt.status);
           }
@@ -227,13 +272,15 @@ var AnimQueue = (function() {
         break;
 
       case 'status_cure':
-        var cureSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var cureSel = null;
+        if (evt.owner) cureSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!cureSel && ctx.findPokemonSelector && evt.pokemon) cureSel = ctx.findPokemonSelector(evt.pokemon);
         if (cureSel) {
           ctx.animateEl(cureSel, 'status-cure', 500);
         }
         // Progressively clear status from snapshot state
-        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
-          var scPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G) {
+          var scPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (scPk && scPk.status) {
             if (evt.status) {
               scPk.status = scPk.status.filter(function(s) { return s !== evt.status; });
@@ -251,14 +298,16 @@ var AnimQueue = (function() {
       case 'item_heal':
         if (ctx.captureHpState) ctx.captureHpState();
         var healTarget = evt.target || evt.pokemon;
-        var healSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(healTarget) : null;
+        var healSel = null;
+        if (evt.owner) healSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!healSel && ctx.findPokemonSelector && healTarget) healSel = ctx.findPokemonSelector(healTarget);
         if (healSel) {
           ctx.showDamagePopupAt(evt.amount, healSel, true);
           ctx.animateEl(healSel, 'heal-pulse', 500);
         }
         // Progressively apply heal to snapshot state
-        if (typeof window !== 'undefined' && window.G && healTarget && evt.amount) {
-          var healPk = _findPokemonObj(healTarget);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var healPk = _findPokemonObj(healTarget, evt.owner);
           if (healPk) {
             healPk.damage = Math.max(0, (healPk.damage || 0) - evt.amount);
             healPk.hp = healPk.maxHp - healPk.damage;
@@ -289,14 +338,16 @@ var AnimQueue = (function() {
 
       case 'reactiveDamage':
         if (ctx.captureHpState) ctx.captureHpState();
-        var rdSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.target) : null;
+        var rdSel = null;
+        if (evt.targetOwner) rdSel = ctx.getPokemonSelector(evt.targetOwner, -1);
+        if (!rdSel && ctx.findPokemonSelector && evt.target) rdSel = ctx.findPokemonSelector(evt.target);
         if (rdSel) {
           ctx.showDamagePopupAt(evt.amount, rdSel, false);
           ctx.animateEl(rdSel, 'hit-shake', 500);
         }
         // Progressively apply reactive damage
-        if (typeof window !== 'undefined' && window.G && evt.target && evt.amount) {
-          var rdPk = _findPokemonObj(evt.target);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var rdPk = _findPokemonObj(evt.target, evt.targetOwner);
           if (rdPk) { rdPk.damage = (rdPk.damage || 0) + evt.amount; rdPk.hp = Math.max(0, rdPk.maxHp - rdPk.damage); }
         }
         ctx.renderBattle();
@@ -305,11 +356,14 @@ var AnimQueue = (function() {
 
       case 'recoilDamage':
         if (ctx.captureHpState) ctx.captureHpState();
-        var rcSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : '#youField .active-slot';
+        var rcSel = null;
+        if (evt.owner) rcSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!rcSel && ctx.findPokemonSelector && evt.pokemon) rcSel = ctx.findPokemonSelector(evt.pokemon);
+        if (!rcSel) rcSel = '#youField .active-slot';
         if (rcSel) ctx.showDamagePopupAt(evt.amount, rcSel, false);
         // Progressively apply recoil damage
-        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
-          var rcPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var rcPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (rcPk) { rcPk.damage = (rcPk.damage || 0) + evt.amount; rcPk.hp = Math.max(0, rcPk.maxHp - rcPk.damage); }
         }
         ctx.renderBattle();
@@ -318,15 +372,17 @@ var AnimQueue = (function() {
 
       case 'energy_gain':
       case 'energyGain':
-        var egSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var egSel = null;
+        if (evt.owner) egSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
+        if (!egSel && ctx.findPokemonSelector && evt.pokemon) egSel = ctx.findPokemonSelector(evt.pokemon);
         if (egSel) {
           ctx.showEnergyPopup(egSel, '+' + (evt.amount || 1) + ' ⚡');
           ctx.animateEl(egSel, 'energy-gain', 400);
           ctx.spawnParticlesAtEl(egSel, '#F7D02C', 6, { spread: 30, size: 4 });
         }
         // Progressively apply energy gain to snapshot state
-        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
-          var egPk = ctx.findPokemonSelector ? _findPokemonObj(evt.pokemon) : null;
+        if (typeof window !== 'undefined' && window.G) {
+          var egPk = _findPokemonObj(evt.pokemon, evt.owner, evt.benchIdx);
           if (egPk) egPk.energy = (egPk.energy || 0) + (evt.amount || 1);
         }
         ctx.renderBattle();
@@ -428,13 +484,15 @@ var AnimQueue = (function() {
 
       case 'ability_damage':
         if (ctx.captureHpState) ctx.captureHpState();
-        var abSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.target) : null;
+        var abSel = null;
+        if (evt.owner) abSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!abSel && ctx.findPokemonSelector && evt.target) abSel = ctx.findPokemonSelector(evt.target);
         if (abSel) {
           ctx.showDamagePopupAt(evt.amount, abSel, false);
           ctx.animateEl(abSel, 'hit-shake', 450);
         }
-        if (typeof window !== 'undefined' && window.G && evt.target && evt.amount) {
-          var adPk = _findPokemonObj(evt.target);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var adPk = _findPokemonObj(evt.target, evt.owner);
           if (adPk) {
             adPk.damage = (adPk.damage || 0) + evt.amount;
             adPk.hp = Math.max(0, adPk.maxHp - adPk.damage);
@@ -464,13 +522,15 @@ var AnimQueue = (function() {
 
       case 'energyStrip':
         // Progressively apply energy strip to defender
-        var esSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var esSel = null;
+        if (evt.targetOwner) esSel = ctx.getPokemonSelector(evt.targetOwner, -1);
+        if (!esSel && ctx.findPokemonSelector && evt.pokemon) esSel = ctx.findPokemonSelector(evt.pokemon);
         if (esSel) {
           ctx.showEnergyPopup(esSel, '-' + (evt.amount || 1) + ' \u26A1');
           ctx.animateEl(esSel, 'hit-shake', 350);
         }
-        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
-          var esPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G) {
+          var esPk = _findPokemonObj(evt.pokemon, evt.targetOwner);
           if (esPk) esPk.energy = Math.max(0, (esPk.energy || 0) - (evt.amount || 1));
         }
         ctx.renderBattle();
@@ -479,12 +539,14 @@ var AnimQueue = (function() {
 
       case 'selfEnergyLoss':
         // Progressively apply self energy loss
-        var selSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var selSel = null;
+        if (evt.owner) selSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!selSel && ctx.findPokemonSelector && evt.pokemon) selSel = ctx.findPokemonSelector(evt.pokemon);
         if (selSel) {
           ctx.showEnergyPopup(selSel, '-' + (evt.amount || 1) + ' \u26A1');
         }
-        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
-          var selPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G) {
+          var selPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (selPk) selPk.energy = Math.max(0, (selPk.energy || 0) - (evt.amount || 1));
         }
         ctx.renderBattle();
@@ -494,13 +556,15 @@ var AnimQueue = (function() {
       case 'selfBenchDmg':
         // Progressively apply bench damage
         if (ctx.captureHpState) ctx.captureHpState();
-        var sbdSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var sbdSel = null;
+        if (evt.owner && evt.benchIdx !== undefined) sbdSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx);
+        if (!sbdSel && ctx.findPokemonSelector && evt.pokemon) sbdSel = ctx.findPokemonSelector(evt.pokemon);
         if (sbdSel) {
           ctx.showDamagePopupAt(evt.amount, sbdSel, false);
           ctx.animateEl(sbdSel, 'hit-shake', 400);
         }
-        if (typeof window !== 'undefined' && window.G && evt.pokemon && evt.amount) {
-          var sbdPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G && evt.amount) {
+          var sbdPk = _findPokemonObj(evt.pokemon, evt.owner, evt.benchIdx);
           if (sbdPk) {
             sbdPk.damage = (sbdPk.damage || 0) + evt.amount;
             sbdPk.hp = Math.max(0, sbdPk.maxHp - sbdPk.damage);
@@ -512,14 +576,16 @@ var AnimQueue = (function() {
 
       case 'baton_pass':
         // Progressively apply baton pass energy gain
-        var bpSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
+        var bpSel = null;
+        if (evt.owner) bpSel = ctx.getPokemonSelector(evt.owner, -1);
+        if (!bpSel && ctx.findPokemonSelector && evt.pokemon) bpSel = ctx.findPokemonSelector(evt.pokemon);
         if (bpSel) {
           ctx.showEnergyPopup(bpSel, '+' + (evt.energy || 0) + ' \u26A1');
           ctx.animateEl(bpSel, 'energy-gain', 400);
           ctx.spawnParticlesAtEl(bpSel, '#F7D02C', 6, { spread: 30, size: 4 });
         }
-        if (typeof window !== 'undefined' && window.G && evt.pokemon) {
-          var bpPk = _findPokemonObj(evt.pokemon);
+        if (typeof window !== 'undefined' && window.G) {
+          var bpPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (bpPk) bpPk.energy = Math.min((bpPk.energy || 0) + (evt.energy || 0), 5);
         }
         ctx.renderBattle();
