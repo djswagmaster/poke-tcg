@@ -46,6 +46,18 @@ function isPassiveBlocked(G) {
   return DamagePipeline.isPassiveBlocked(G);
 }
 
+// Check if a player's OPPONENT has a specific passive ability in play
+function _oppHasPassive(G, playerNum, abilityKey) {
+  var opponent = G.players[opp(playerNum)];
+  var allPokemon = [opponent.active].concat(opponent.bench).filter(Boolean);
+  for (var i = 0; i < allPokemon.length; i++) {
+    if (allPokemon[i].hp <= 0) continue;
+    var d = PokemonDB.getPokemonData(allPokemon[i].name);
+    if (d && d.ability && d.ability.key === abilityKey && d.ability.type === 'passive') return true;
+  }
+  return false;
+}
+
 // Healing Scarf: heal 20 whenever a Pokemon gains energy
 function triggerHealingScarf(G, pk, healAmount) {
   if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
@@ -294,12 +306,26 @@ function endTurn(G) {
       if (burnResult.ko) {
         G.events = G.events.concat(burnResult.events);
       }
-      if (pk.hp > 0 && pk.status.indexOf('burn') !== -1 && Math.random() < 0.5) {
+      // Magma Sear: opponent's Magmar forces burn recovery to always fail
+      var magmaSearActive = !isPassiveBlocked(G) && _oppHasPassive(G, side.pNum, 'magmaSear');
+      var burnCoinHeads = magmaSearActive ? false : (Math.random() < 0.5);
+      if (pk.hp > 0 && pk.status.indexOf('burn') !== -1 && burnCoinHeads) {
         pk.status = pk.status.filter(function(s) { return s !== 'burn'; });
         addLog(G, pk.name + "'s burn healed! (Heads)", 'heal');
         G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'burn', reason: 'coinFlip' });
       } else if (pk.hp > 0 && pk.status.indexOf('burn') !== -1) {
-        addLog(G, pk.name + ' is still Burned (Tails)', 'info');
+        if (magmaSearActive) {
+          addLog(G, 'Magma Sear forces tails! ' + pk.name + ' is still Burned', 'effect');
+          // Deal 10 extra damage from Magma Sear
+          var searResult = DamagePipeline.dealStatusDamage(G, pk, 10, side.pNum, 'magmaSear');
+          addLog(G, 'Magma Sear deals 10 to ' + pk.name, 'damage');
+          G.events.push({ type: 'ability_effect', ability: 'magmaSear', target: pk.name, damage: 10 });
+          if (searResult.ko) {
+            G.events = G.events.concat(searResult.events);
+          }
+        } else {
+          addLog(G, pk.name + ' is still Burned (Tails)', 'info');
+        }
       }
     }
 
@@ -1042,6 +1068,24 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_effect', ability: key, target: op(G).active.name });
       break;
 
+    case 'deadlySlice': // Seviper: deal 30 to opp active if poisoned
+      var dsTarget = op(G).active;
+      if (!dsTarget || dsTarget.hp <= 0) return false;
+      if (dsTarget.status.indexOf('poison') === -1) {
+        addLog(G, 'Deadly Slice failed — target is not Poisoned!', 'info');
+        return false;
+      }
+      var dsResult = DamagePipeline.applyDamage(G, dsTarget, 30, opp(G.currentPlayer));
+      addLog(G, 'Deadly Slice deals 30 to poisoned ' + dsTarget.name + '!', 'effect');
+      G.events.push({ type: 'ability_damage', ability: 'deadlySlice', target: dsTarget.name, amount: 30 });
+      G.events = G.events.concat(dsResult.events);
+      if (dsResult.ko) {
+        var dsKoEvents = DamagePipeline.handleKO(G, dsTarget, op(G));
+        G.events = G.events.concat(dsKoEvents);
+      }
+      p.usedAbilities[key] = true;
+      break;
+
     case 'healingTouch': // Mega Audino: 1 mana, heal 30 + cure status on Active (unlimited)
       if (p.mana < 1) return false;
       if (!p.active) return false;
@@ -1294,13 +1338,20 @@ function checkStatusBeforeAttack(G, attacker) {
     return 'blocked';
   }
   if (attacker.status.indexOf('confusion') !== -1) {
-    if (Math.random() < 0.5) {
+    // Topsy Turvy: opponent's Malamar forces confusion coin to tails
+    var topsyTurvyActive = !isPassiveBlocked(G) && _oppHasPassive(G, G.currentPlayer, 'topsyTurvy');
+    var confusionCoinHeads = topsyTurvyActive ? false : (Math.random() < 0.5);
+    if (confusionCoinHeads) {
       attacker.status = attacker.status.filter(function(s) { return s !== 'confusion'; });
       addLog(G, attacker.name + ' snapped out of Confusion! (Heads)', 'info');
       G.events.push({ type: 'status_cure', pokemon: attacker.name, status: 'confusion', reason: 'coinFlip' });
       return 'ok';
     } else {
-      addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
+      if (topsyTurvyActive) {
+        addLog(G, 'Topsy Turvy forces tails! ' + attacker.name + ' is Confused!', 'effect');
+      } else {
+        addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
+      }
       G.events.push({ type: 'confusion_fail', pokemon: attacker.name });
       endTurn(G);
       return 'ended';

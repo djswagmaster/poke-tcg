@@ -135,6 +135,15 @@ register('sleep', function(G, ctx, params) {
   return null;
 });
 
+register('confuse', function(G, ctx, params) {
+  if (!ctx.defender || ctx.defender.hp <= 0) return null;
+  if (ctx.defender.heldItem === 'Protect Goggles') return null;
+  if (ctx.defender.status.indexOf('confusion') !== -1) return null;
+  ctx.defender.status.push('confusion');
+  ctx.events.push({ type: 'statusApplied', pokemon: ctx.defender.name, status: 'confusion', source: ctx.attack.name });
+  return null;
+});
+
 // --- Energy strip ---
 register('stripEnergy', function(G, ctx, params) {
   if (!ctx.defender || ctx.defender.hp <= 0) return null;
@@ -262,6 +271,24 @@ register('oppBenchDmg', function(G, ctx, params) {
   var benchAtk = { baseDmg: v, fx: '' };
   ctx.oppPlayer.bench.forEach(function(pk) {
     var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, pk, benchAtk, ctx.attackerTypes, ctx.oppPlayerNum);
+    ctx.events = ctx.events.concat(result.events);
+  });
+  return null;
+});
+
+// --- ALL bench damage (both sides) ---
+register('allBenchDmg', function(G, ctx, params) {
+  _deps();
+  var v = params[0] || 0;
+  var benchAtk = { baseDmg: v, fx: '' };
+  // Damage opponent's bench
+  ctx.oppPlayer.bench.forEach(function(pk) {
+    var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, pk, benchAtk, ctx.attackerTypes, ctx.oppPlayerNum);
+    ctx.events = ctx.events.concat(result.events);
+  });
+  // Damage own bench
+  ctx.myPlayer.bench.forEach(function(pk) {
+    var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, pk, benchAtk, ctx.attackerTypes, ctx.currentPlayer);
     ctx.events = ctx.events.concat(result.events);
   });
   return null;

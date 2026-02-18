@@ -166,6 +166,18 @@ var POKEMON_DB = [
     ability:{name:"Bloodthirsty",desc:"1 mana: force opp to switch Active",type:"active",key:"bloodthirsty",activeOnly:true},
     attacks:[{name:"Finishing Fang",energy:3,baseDmg:60,desc:"+60 if defender <=120 HP",fx:"finishingFang"}]},
 
+  {name:"Magmar",types:["Fire"],cost:4,hp:190,weakness:["Water"],resistance:["Fairy"],
+    ability:{name:"Magma Sear",desc:"Opp burn recovery coin always tails; deal 10 extra damage",type:"passive",key:"magmaSear"},
+    attacks:[{name:"Lava Toss",energy:3,baseDmg:70,desc:"Burn",fx:"burn"}]},
+
+  {name:"Malamar",types:["Psychic"],cost:4,hp:200,weakness:["Fairy"],resistance:["Psychic"],
+    ability:{name:"Topsy Turvy",desc:"Opp confused coin flip always treated as tails",type:"passive",key:"topsyTurvy"},
+    attacks:[{name:"Psychic Jumble",energy:3,baseDmg:50,desc:"Confuse",fx:"confuse"}]},
+
+  {name:"Mamoswine",types:["Ice","Ground"],cost:4,hp:220,weakness:["Grass","Water"],resistance:["Ice","Electric"],
+    attacks:[{name:"Icicle Shard",energy:2,baseDmg:80,desc:"",fx:""},
+             {name:"Huge Earthquake",energy:4,baseDmg:100,desc:"30 to ALL bench (both sides)",fx:"allBenchDmg:30"}]},
+
   {name:"Marowak",types:["Ground"],cost:3,hp:200,weakness:["Grass"],resistance:["Electric"],
     attacks:[{name:"Bonemerang",energy:2,baseDmg:50,desc:"100 sustained",fx:"sustained:50"}]},
 
@@ -260,6 +272,10 @@ var POKEMON_DB = [
   {name:"Scovillain",types:["Grass","Fire"],cost:4,hp:180,weakness:["Poison"],resistance:["Water","Fairy"],
     attacks:[{name:"Chili Bite",energy:1,baseDmg:40,desc:"Burn",fx:"burn"},
              {name:"Spicy Rage",energy:3,baseDmg:40,desc:"+dmg on self",fx:"berserk"}]},
+
+  {name:"Seviper",types:["Poison"],cost:4,hp:190,weakness:["Psychic"],resistance:["Grass"],
+    ability:{name:"Deadly Slice",desc:"Deal 30 damage to opp Active if it is Poisoned",type:"active",key:"deadlySlice"},
+    attacks:[{name:"Toxic Blade",energy:3,baseDmg:70,desc:"Poison",fx:"poison"}]},
 
   {name:"Shedinja",types:["Bug","Ghost"],cost:1,hp:60,weakness:["Fire","Dark"],resistance:["Fighting","Normal"],
     ability:{name:"Draining Vessel",desc:"On play: strip 2 from opp Active",type:"onPlay",key:"soulDrain"},
