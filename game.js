@@ -903,8 +903,9 @@ function showPassScreen(playerNum, subtitle, callback) {
 
 // ---------- SETUP PHASE ----------
 let setupStep = 0; // 0=P1 active, 1=P2 active, 2=P1 bench, 3=P2 bench
-let setupSelected = []; // {name, heldItem}
+let setupSelected = []; // {name, heldItem, extraItems?:[]}
 let setupItemFor = null; // pokemon name being assigned item
+let setupKeyringItems = []; // temp multi-item selection for Klefki
 
 function startSetupPhase() {
   setupStep = 0;
@@ -920,6 +921,7 @@ function showSetupScreen() {
   G.currentPlayer = playerNum;
 
   setupSelected = [];
+  setupKeyringItems = [];
   showScreen('setupScreen');
 
   const phaseText = isActivePhase ? `${p.name}: Choose Active Pokémon + Item` : `${p.name}: Choose Bench Pokémon + Items`;
@@ -946,17 +948,42 @@ function renderSetup() {
 
   let html = '';
   if (setupItemFor) {
-    // Show items to pick
-    html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${setupItemFor} (or skip):</div>`;
-    html += `<div class="setup-card" onclick="assignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
-    html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
-    itemHand.forEach(c => {
-      const used = setupSelected.some(s => s.heldItem === c.name);
-      html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
-        <img src="${getImg(c.name)}" alt="${c.name}">
-        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
-      </div>`;
-    });
+    // Check if this is a Klefki (Keyring) — multi-item select
+    const setupPokeData = getPokemonData(setupItemFor);
+    const isKeyring = setupPokeData && setupPokeData.ability && setupPokeData.ability.key === 'keyring';
+    const maxSetupItems = isKeyring ? 3 : 1;
+    const usedItems = new Set(setupSelected.map(s => s.heldItem).filter(Boolean));
+    setupSelected.forEach(s => { if (s.extraItems) s.extraItems.forEach(ei => usedItems.add(ei)); });
+    setupKeyringItems.forEach(ki => usedItems.add(ki));
+
+    if (isKeyring) {
+      html += `<div style="width:100%;font-size:12px;color:#a855f7;font-weight:700;margin-bottom:8px;">KEYRING: Choose up to 3 items for ${setupItemFor} (${setupKeyringItems.length}/3)</div>`;
+      html += `<div class="setup-card" onclick="confirmSetupKeyring()" style="width:100px;border:2px solid #22c55e;display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#22c55e;font-size:11px">${setupKeyringItems.length > 0 ? 'Confirm (' + setupKeyringItems.length + ')' : 'No Items'}</span></div>`;
+      html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
+      itemHand.forEach(c => {
+        const used = usedItems.has(c.name) && setupKeyringItems.indexOf(c.name) === -1;
+        const isSelected = setupKeyringItems.indexOf(c.name) !== -1;
+        const atMax = setupKeyringItems.length >= 3 && !isSelected;
+        const borderStyle = isSelected ? 'border:2px solid #a855f7;box-shadow:0 0 8px #a855f7' : (atMax || used ? 'opacity:0.4' : '');
+        html += `<div class="setup-card ${used?'placed':''}" onclick="${!used ? `toggleSetupKeyringItem('${c.name.replace(/'/g,"\\'")}')` : ''}" style="${borderStyle}">
+          <img src="${getImg(c.name)}" alt="${c.name}">
+          ${isSelected ? '<div style="position:absolute;top:2px;left:2px;background:#a855f7;color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold">✓</div>' : ''}
+          <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
+        </div>`;
+      });
+    } else {
+      // Standard single-item select
+      html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${setupItemFor} (or skip):</div>`;
+      html += `<div class="setup-card" onclick="assignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
+      html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
+      itemHand.forEach(c => {
+        const used = usedItems.has(c.name);
+        html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
+          <img src="${getImg(c.name)}" alt="${c.name}">
+          <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
+        </div>`;
+      });
+    }
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
@@ -970,21 +997,30 @@ function renderSetup() {
   }
   hand.innerHTML = html;
 
+  // Helper: build item label text for setup preview
+  function _setupItemLabel(sel) {
+    const items = [sel.heldItem].concat(sel.extraItems || []).filter(Boolean);
+    if (items.length === 0) return 'No item';
+    return items.join(', ');
+  }
+
   // Preview slots
   const preview = document.getElementById('setupPreview');
   let previewHtml = '';
 
   if (isActivePhase) {
     const sel = setupSelected[0];
+    const itemLabel = sel ? _setupItemLabel(sel) : '';
     previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="unselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${itemLabel}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     const maxBench = p.maxBench || Constants.MAX_BENCH;
     for (let i = 0; i < maxBench; i++) {
       const sel = setupSelected[i];
+      const itemLabel = sel ? _setupItemLabel(sel) : '';
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="unselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${itemLabel}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }
@@ -1009,6 +1045,7 @@ function selectSetupPokemon(name) {
 
   p.mana -= data.cost;
   setupItemFor = name;
+  setupKeyringItems = [];
   renderSetup();
 }
 
@@ -1019,6 +1056,27 @@ function cancelSetupItem() {
   const data = getPokemonData(setupItemFor);
   if (data) p.mana += data.cost;
   setupItemFor = null;
+  setupKeyringItems = [];
+  renderSetup();
+}
+
+function toggleSetupKeyringItem(itemName) {
+  const pos = setupKeyringItems.indexOf(itemName);
+  if (pos !== -1) {
+    setupKeyringItems.splice(pos, 1);
+  } else if (setupKeyringItems.length < 3) {
+    setupKeyringItems.push(itemName);
+  }
+  renderSetup();
+}
+
+function confirmSetupKeyring() {
+  if (!setupItemFor) return;
+  const primary = setupKeyringItems.length > 0 ? setupKeyringItems[0] : null;
+  const extras = setupKeyringItems.slice(1);
+  setupSelected.push({ name: setupItemFor, heldItem: primary, extraItems: extras.length > 0 ? extras : undefined });
+  setupItemFor = null;
+  setupKeyringItems = [];
   renderSetup();
 }
 
@@ -1035,11 +1093,36 @@ function unselectSetup(idx) {
 
 function assignSetupItem(itemName) {
   const usedItems = new Set(setupSelected.map(s => s.heldItem).filter(Boolean));
+  setupSelected.forEach(s => { if (s.extraItems) s.extraItems.forEach(ei => usedItems.add(ei)); });
   if (itemName && usedItems.has(itemName)) return;
 
   setupSelected.push({ name: setupItemFor, heldItem: itemName });
   setupItemFor = null;
   renderSetup();
+}
+
+// Apply extra Keyring items to a Pokemon during setup
+function _applySetupExtraItems(pk, sel) {
+  if (!sel.extraItems || sel.extraItems.length === 0) return;
+  // Build full heldItems array: primary + extras
+  const allItems = [sel.heldItem].concat(sel.extraItems).filter(Boolean);
+  if (allItems.length > 1) {
+    pk.heldItems = allItems;
+  }
+  // Apply stat-modifying extras (same logic as server-side applyExtraItem)
+  const data = getPokemonData(pk.name);
+  sel.extraItems.forEach(itemName => {
+    if (itemName === 'Health Charm') {
+      pk.baseMaxHp = (pk.baseMaxHp || pk.maxHp) + 50; pk.maxHp += 50; pk.hp += 50;
+    } else if (itemName === 'Power Herb') {
+      pk.energy = Math.min(5, pk.energy + 1);
+    } else if (itemName === 'Quick Claw') {
+      pk.quickClawActive = true;
+    } else if (itemName === 'Eviolite' && data && data.cost <= 3) {
+      const bonus = (4 - data.cost) * 10;
+      pk.baseMaxHp = (pk.baseMaxHp || pk.maxHp) + bonus; pk.maxHp += bonus; pk.hp += bonus;
+    }
+  });
 }
 
 function confirmSetup() {
@@ -1056,17 +1139,21 @@ function confirmSetup() {
   if (isActivePhase) {
     const sel = setupSelected[0];
     p.active = makePokemon(sel.name, sel.heldItem);
+    _applySetupExtraItems(p.active, sel);
     _onPlayAbilityLocal(playerNum, p.active);
     // Remove from hand
     p.hand = p.hand.filter(c => c.name !== sel.name);
     if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
+    if (sel.extraItems) sel.extraItems.forEach(ei => { p.hand = p.hand.filter(c => c.name !== ei); });
   } else {
     setupSelected.forEach(sel => {
       const setupPk = makePokemon(sel.name, sel.heldItem);
+      _applySetupExtraItems(setupPk, sel);
       p.bench.push(setupPk);
       _onPlayAbilityLocal(playerNum, setupPk);
       p.hand = p.hand.filter(c => c.name !== sel.name);
       if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
+      if (sel.extraItems) sel.extraItems.forEach(ei => { p.hand = p.hand.filter(c => c.name !== ei); });
     });
   }
 
