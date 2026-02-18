@@ -274,40 +274,54 @@ function applyDamage(G, pokemon, amount, ownerPlayerNum) {
   pokemon.hp = pokemon.maxHp - pokemon.damage;
 
   // Focus Sash (hooks: onLethalDamage)
-  if (pokemon.hp <= 0 && pokemon.heldItem) {
-    var lethalResult = ItemDB.runItemHook('onLethalDamage', pokemon.heldItem, {
-      holder: pokemon, damageAmount: amount, G: G
-    });
-    if (lethalResult && lethalResult.surviveAt) {
-      pokemon.damage = pokemon.maxHp - lethalResult.surviveAt;
-      pokemon.hp = lethalResult.surviveAt;
-      events.push({
-        type: 'itemProc', item: pokemon.heldItem, pokemon: pokemon.name,
-        effect: 'focusSash', hpLeft: lethalResult.surviveAt
+  var allItemsLethal = getHeldItems(pokemon);
+  if (pokemon.hp <= 0 && allItemsLethal.length > 0) {
+    for (var li = 0; li < allItemsLethal.length; li++) {
+      var lethalResult = ItemDB.runItemHook('onLethalDamage', allItemsLethal[li], {
+        holder: pokemon, damageAmount: amount, G: G
       });
-      if (lethalResult.discard) {
-        pokemon.heldItemUsed = true;
-        pokemon.heldItem = null;
+      if (lethalResult && lethalResult.surviveAt) {
+        pokemon.damage = pokemon.maxHp - lethalResult.surviveAt;
+        pokemon.hp = lethalResult.surviveAt;
+        events.push({
+          type: 'itemProc', item: allItemsLethal[li], pokemon: pokemon.name,
+          effect: 'focusSash', hpLeft: lethalResult.surviveAt
+        });
+        if (lethalResult.discard) {
+          pokemon.heldItemUsed = true;
+          if (pokemon.heldItem === allItemsLethal[li]) pokemon.heldItem = null;
+          if (pokemon.heldItems) {
+            var lIdx = pokemon.heldItems.indexOf(allItemsLethal[li]);
+            if (lIdx !== -1) pokemon.heldItems.splice(lIdx, 1);
+          }
+        }
+        return { ko: false, events: events };
       }
-      return { ko: false, events: events };
     }
   }
 
   // Sitrus Berry (hooks: onDamaged)
-  if (pokemon.heldItem && !pokemon.heldItemUsed && pokemon.hp > 0) {
-    var dmgResult = ItemDB.runItemHook('onDamaged', pokemon.heldItem, {
-      holder: pokemon, G: G
-    });
-    if (dmgResult && dmgResult.heal) {
-      pokemon.damage = Math.max(0, pokemon.damage - dmgResult.heal);
-      pokemon.hp = pokemon.maxHp - pokemon.damage;
-      events.push({
-        type: 'itemProc', item: pokemon.heldItem, pokemon: pokemon.name,
-        effect: 'heal', amount: dmgResult.heal
+  var allItemsDmg = getHeldItems(pokemon);
+  if (allItemsDmg.length > 0 && !pokemon.heldItemUsed && pokemon.hp > 0) {
+    for (var di = 0; di < allItemsDmg.length; di++) {
+      var dmgResult = ItemDB.runItemHook('onDamaged', allItemsDmg[di], {
+        holder: pokemon, G: G
       });
-      if (dmgResult.discard) {
-        pokemon.heldItemUsed = true;
-        pokemon.heldItem = null;
+      if (dmgResult && dmgResult.heal) {
+        pokemon.damage = Math.max(0, pokemon.damage - dmgResult.heal);
+        pokemon.hp = pokemon.maxHp - pokemon.damage;
+        events.push({
+          type: 'itemProc', item: allItemsDmg[di], pokemon: pokemon.name,
+          effect: 'heal', amount: dmgResult.heal
+        });
+        if (dmgResult.discard) {
+          pokemon.heldItemUsed = true;
+          if (pokemon.heldItem === allItemsDmg[di]) pokemon.heldItem = null;
+          if (pokemon.heldItems) {
+            var dIdx = pokemon.heldItems.indexOf(allItemsDmg[di]);
+            if (dIdx !== -1) pokemon.heldItems.splice(dIdx, 1);
+          }
+        }
       }
     }
   }
@@ -350,16 +364,22 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
   }
 
   // Item onKO hook (Rescue Scarf: return to hand, Exp. Share: transfer energy)
-  // Run once and cache result to avoid double-calling the same hook.
   var koItemResult = null;
-  var koItemName = pokemon.heldItem;
-  if (koItemName) {
-    koItemResult = ItemDB.runItemHook('onKO', koItemName, {
+  var allItemsKO = getHeldItems(pokemon);
+  for (var ki = 0; ki < allItemsKO.length; ki++) {
+    var koRes = ItemDB.runItemHook('onKO', allItemsKO[ki], {
       holder: pokemon, owner: owner, G: G
     });
-    if (koItemResult && koItemResult.returnToHand) {
-      owner.hand.push({ name: pokemon.name, type: 'pokemon', heldItem: null });
-      events.push({ type: 'itemProc', item: 'Rescue Scarf', pokemon: pokemon.name, effect: 'returnToHand' });
+    if (koRes) {
+      if (!koItemResult) koItemResult = {};
+      for (var kk in koRes) { if (koRes.hasOwnProperty(kk)) {
+        if (typeof koRes[kk] === 'number' && koItemResult[kk]) koItemResult[kk] += koRes[kk];
+        else koItemResult[kk] = koRes[kk];
+      }}
+      if (koRes.returnToHand) {
+        owner.hand.push({ name: pokemon.name, type: 'pokemon', heldItem: null });
+        events.push({ type: 'itemProc', item: allItemsKO[ki], pokemon: pokemon.name, effect: 'returnToHand' });
+      }
     }
   }
 
@@ -391,7 +411,7 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
       if (koItemResult && koItemResult.transferEnergy) {
         expShareTransfer = Math.min(koItemResult.transferEnergy, pokemon.energy || 0);
         if (expShareTransfer > 0) {
-          events.push({ type: 'itemProc', item: koItemName, pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
+          events.push({ type: 'itemProc', item: 'Exp. Share', pokemon: pokemon.name, effect: 'expSharePrimed', amount: expShareTransfer });
         }
       }
       G.pendingRetreats.push({
@@ -428,50 +448,57 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
 
   // Reactive on-damaged items should still trigger even if the holder was
   // KO'd by the hit (e.g. Rocky Helmet retaliation on lethal contact).
-  if (!defender.heldItem) return events;
+  var reactiveItems = getHeldItems(defender);
+  if (reactiveItems.length === 0) return events;
 
-  // Weakness Policy (special: energy gain on super-effective)
-  var wpResult = ItemDB.runItemHook('onDamagedByAttack', defender.heldItem, {
-    holder: defender, attacker: attacker, mult: attackResult.mult,
-    damage: attackResult.damage, G: G
-  });
+  for (var ri = 0; ri < reactiveItems.length; ri++) {
+    var riName = reactiveItems[ri];
+    var wpResult = ItemDB.runItemHook('onDamagedByAttack', riName, {
+      holder: defender, attacker: attacker, mult: attackResult.mult,
+      damage: attackResult.damage, G: G
+    });
 
-  if (wpResult) {
-    if (wpResult.energyGain) {
-      defender.energy = Math.min(5, defender.energy + wpResult.energyGain);
-      events.push({
-        type: 'itemProc', item: defender.heldItem, pokemon: defender.name,
-        effect: 'energyGain', amount: wpResult.energyGain
-      });
-    }
-    if (wpResult.events) {
-      for (var i = 0; i < wpResult.events.length; i++) {
-        var evt = wpResult.events[i];
-        if (evt.type === 'damage' && evt.target) {
-          var dmgRes = applyDamage(G, evt.target, evt.amount, attackerOwner);
-          events.push({
-            type: 'reactiveDamage', source: evt.source, target: evt.target.name,
-            amount: evt.amount, targetOwner: attackerOwner
-          });
-          events = events.concat(dmgRes.events);
-          if (dmgRes.ko) {
-            var koEvents = handleKO(G, evt.target, attackerOwner);
-            events = events.concat(koEvents);
-          }
-        }
-        if (evt.type === 'addStatus' && evt.target) {
-          if (evt.target.status.indexOf(evt.status) === -1) {
-            evt.target.status.push(evt.status);
+    if (wpResult) {
+      if (wpResult.energyGain) {
+        defender.energy = Math.min(5, defender.energy + wpResult.energyGain);
+        events.push({
+          type: 'itemProc', item: riName, pokemon: defender.name,
+          effect: 'energyGain', amount: wpResult.energyGain
+        });
+      }
+      if (wpResult.events) {
+        for (var i = 0; i < wpResult.events.length; i++) {
+          var evt = wpResult.events[i];
+          if (evt.type === 'damage' && evt.target) {
+            var dmgRes = applyDamage(G, evt.target, evt.amount, attackerOwner);
             events.push({
-              type: 'statusApplied', pokemon: evt.target.name, status: evt.status, source: evt.source
+              type: 'reactiveDamage', source: evt.source, target: evt.target.name,
+              amount: evt.amount, targetOwner: attackerOwner
             });
+            events = events.concat(dmgRes.events);
+            if (dmgRes.ko) {
+              var koEvents = handleKO(G, evt.target, attackerOwner);
+              events = events.concat(koEvents);
+            }
+          }
+          if (evt.type === 'addStatus' && evt.target) {
+            if (evt.target.status.indexOf(evt.status) === -1) {
+              evt.target.status.push(evt.status);
+              events.push({
+                type: 'statusApplied', pokemon: evt.target.name, status: evt.status, source: evt.source
+              });
+            }
           }
         }
       }
-    }
-    if (wpResult.discard) {
-      defender.heldItemUsed = true;
-      defender.heldItem = null;
+      if (wpResult.discard) {
+        defender.heldItemUsed = true;
+        if (defender.heldItem === riName) defender.heldItem = null;
+        if (defender.heldItems) {
+          var rIdx = defender.heldItems.indexOf(riName);
+          if (rIdx !== -1) defender.heldItems.splice(rIdx, 1);
+        }
+      }
     }
   }
 
