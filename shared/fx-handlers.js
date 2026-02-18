@@ -146,17 +146,23 @@ register('confuse', function(G, ctx, params) {
 
 // --- Energy strip ---
 register('stripEnergy', function(G, ctx, params) {
+  _deps();
   if (!ctx.defender || ctx.defender.hp <= 0) return null;
   var v = params[0] || 1;
   var actual = Math.min(v, ctx.defender.energy);
 
   // White Herb check
-  if (ctx.defender.heldItem === 'White Herb' && !ctx.defender.heldItemUsed) {
+  var defItems = DamagePipeline.getHeldItems(ctx.defender);
+  if (defItems.indexOf('White Herb') !== -1 && !ctx.defender.heldItemUsed) {
     var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.defender, amount: actual });
     if (whResult) {
       var prevented = whResult.prevented || 0;
       actual = Math.max(0, actual - prevented);
-      if (whResult.discard) { ctx.defender.heldItemUsed = true; ctx.defender.heldItem = null; }
+      if (whResult.discard) {
+        ctx.defender.heldItemUsed = true;
+        if (ctx.defender.heldItem === 'White Herb') ctx.defender.heldItem = null;
+        if (ctx.defender.heldItems) { var wi = ctx.defender.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.defender.heldItems.splice(wi, 1); }
+      }
       ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.defender.name, effect: 'preventEnergyLoss', prevented: prevented });
     }
   }
@@ -179,15 +185,21 @@ register('selfDmg', function(G, ctx, params) {
 
 // --- Self energy loss ---
 register('selfEnergyLoss', function(G, ctx, params) {
+  _deps();
   var v = params[0] || 1;
   if (v >= 99) v = ctx.attacker.energy;
 
   // White Herb on self
-  if (ctx.attacker.heldItem === 'White Herb' && !ctx.attacker.heldItemUsed) {
+  var atkItems = DamagePipeline.getHeldItems(ctx.attacker);
+  if (atkItems.indexOf('White Herb') !== -1 && !ctx.attacker.heldItemUsed) {
     var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.attacker, amount: v });
     if (whResult) {
       v = Math.max(0, v - (whResult.prevented || 0));
-      if (whResult.discard) { ctx.attacker.heldItemUsed = true; ctx.attacker.heldItem = null; }
+      if (whResult.discard) {
+        ctx.attacker.heldItemUsed = true;
+        if (ctx.attacker.heldItem === 'White Herb') ctx.attacker.heldItem = null;
+        if (ctx.attacker.heldItems) { var wi = ctx.attacker.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.attacker.heldItems.splice(wi, 1); }
+      }
       ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.attacker.name, effect: 'preventEnergyLoss', prevented: whResult.prevented });
     }
   }

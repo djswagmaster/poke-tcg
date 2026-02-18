@@ -693,6 +693,16 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var stripAmount = info.amount || 0;
     if (stripAmount <= 0) return false;
     var actualStrip = Math.min(stripAmount, targetPk.energy);
+    // White Herb protection
+    var allStripItems = DamagePipeline.getHeldItems(targetPk);
+    if (allStripItems.indexOf('White Herb') !== -1 && !targetPk.heldItemUsed) {
+      var whPrevented = Math.min(actualStrip, 2);
+      actualStrip = Math.max(0, actualStrip - whPrevented);
+      targetPk.heldItemUsed = true;
+      if (targetPk.heldItem === 'White Herb') targetPk.heldItem = null;
+      if (targetPk.heldItems) { var whIdx = targetPk.heldItems.indexOf('White Herb'); if (whIdx !== -1) targetPk.heldItems.splice(whIdx, 1); }
+      G.events.push({ type: 'itemProc', item: 'White Herb', pokemon: targetPk.name, effect: 'preventEnergyLoss', prevented: whPrevented });
+    }
     targetPk.energy = Math.max(0, targetPk.energy - actualStrip);
     G.events.push({ type: 'energyStrip', pokemon: targetPk.name, amount: actualStrip, source: 'anyStrip', targetOwner: targetPlayer });
 
