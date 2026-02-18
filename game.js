@@ -129,12 +129,89 @@ function animateEl(selector, className, duration) {
   setTimeout(() => el.classList.remove(className), duration);
 }
 
+// Screen shake for massive damage — applies to the battle field container
+function screenShake() {
+  const field = document.querySelector('.battle-field');
+  if (field) {
+    field.classList.add('screen-shake');
+    setTimeout(() => field.classList.remove('screen-shake'), 500);
+  }
+}
+
+// KO flash overlay on a player's field side
+function koFlash(ownerPlayerNum) {
+  const side = ownerPlayerNum === meNum() ? '#youField' : '#oppField';
+  const el = document.querySelector(side);
+  if (!el) return;
+  const flash = document.createElement('div');
+  flash.className = 'ko-flash';
+  el.appendChild(flash);
+  setTimeout(() => flash.remove(), 600);
+}
+
+// Heal sparkle particles (green, rising)
+function spawnHealSparkles(targetSelector) {
+  const el = document.querySelector(targetSelector);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let container = document.querySelector('.particle-container');
+  if (!container) return;
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    const x = cx + (Math.random() - 0.5) * 50;
+    const y = cy + (Math.random() - 0.5) * 30;
+    p.className = 'particle';
+    p.style.cssText = `left:${x}px;top:${y}px;width:5px;height:5px;background:#4ade80;box-shadow:0 0 4px #4ade80;animation:healSparkle ${500 + Math.random()*300}ms ease-out forwards;animation-delay:${Math.random()*150}ms;`;
+    container.appendChild(p);
+    setTimeout(() => p.remove(), 1000);
+  }
+}
+
+// Status-specific particles
+function spawnStatusParticles(targetSelector, statusType) {
+  const colors = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
+  const color = colors[statusType] || '#999';
+  spawnParticlesAtEl(targetSelector, color, 10, { spread: 40, size: statusType === 'burn' ? 4 : 5 });
+}
+
+// "Miss" / "No Damage" floating text popup
+function showMissPopup(targetSelector, text) {
+  const target = document.querySelector(targetSelector);
+  const el = document.createElement('div');
+  el.className = 'damage-popup miss-popup';
+  el.textContent = text;
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+// "Blocked" floating text popup
+function showBlockedPopup(targetSelector, text) {
+  const target = document.querySelector(targetSelector);
+  const el = document.createElement('div');
+  el.className = 'damage-popup blocked-popup';
+  el.textContent = text;
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
 function showTurnOverlay(text) {
   const overlay = document.createElement('div');
   overlay.className = 'turn-overlay';
   overlay.innerHTML = `<div class="turn-overlay-text">${text}</div>`;
   document.body.appendChild(overlay);
-  setTimeout(() => overlay.remove(), 1000);
+  setTimeout(() => overlay.remove(), 1100);
 }
 
 // Positioned damage popup near a target element
@@ -145,14 +222,14 @@ function showDamagePopupAt(amount, targetSelector, isHeal) {
   el.textContent = (isHeal ? '+' : '-') + amount;
   if (target) {
     const rect = target.getBoundingClientRect();
-    el.style.left = rect.left + rect.width / 2 + 'px';
-    el.style.top = rect.top + rect.height * 0.3 + 'px';
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
   } else {
     el.style.left = '50%';
     el.style.top = '35%';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1000);
+  setTimeout(() => el.remove(), 900);
 }
 
 // Particle burst effect
@@ -171,9 +248,9 @@ function spawnParticles(x, y, color, count, opts = {}) {
     p.className = 'particle';
     const dx = (Math.random() - 0.5) * spread * 2;
     const dy = (Math.random() - 0.5) * spread * 2;
-    p.style.cssText = `left:${x}px;top:${y}px;width:${size + Math.random()*4}px;height:${size + Math.random()*4}px;background:${color};--dx:${dx}px;--dy:${dy}px;animation:particleFly ${duration + Math.random()*200}ms ease-out forwards;animation-delay:${Math.random()*100}ms;`;
+    p.style.cssText = `left:${x}px;top:${y}px;width:${size + Math.random()*4}px;height:${size + Math.random()*4}px;background:${color};box-shadow:0 0 3px ${color};--dx:${dx}px;--dy:${dy}px;animation:particleFly ${duration + Math.random()*200}ms ease-out forwards;animation-delay:${Math.random()*100}ms;`;
     container.appendChild(p);
-    setTimeout(() => p.remove(), duration + 400);
+    setTimeout(() => p.remove(), duration + 500);
   }
 }
 
@@ -247,11 +324,12 @@ function animateHpBars() {
   }
 }
 
-// Energy gain popup (yellow)
+// Energy gain/loss popup (yellow)
 function showEnergyPopup(targetSelector, text) {
   const target = document.querySelector(targetSelector);
   const el = document.createElement('div');
-  el.className = 'damage-popup energy-popup';
+  const isDrain = text.startsWith('-');
+  el.className = 'damage-popup ' + (isDrain ? 'energy-drain' : 'energy-popup');
   el.textContent = text;
   if (target) {
     const rect = target.getBoundingClientRect();
@@ -259,7 +337,7 @@ function showEnergyPopup(targetSelector, text) {
     el.style.top = (rect.top + rect.height * 0.3) + 'px';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1500);
+  setTimeout(() => el.remove(), 900);
 }
 
 // Mana gain popup (cyan)
@@ -272,12 +350,15 @@ function showManaPopup(amount) {
     const rect = manaEl.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2) + 'px';
     el.style.top = (rect.top - 20) + 'px';
+    // Bump the mana display
+    manaEl.classList.add('mana-bump');
+    setTimeout(() => manaEl.classList.remove('mana-bump'), 400);
   } else {
     el.style.left = '50%';
     el.style.top = '80%';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1500);
+  setTimeout(() => el.remove(), 900);
 }
 
 function showManaPopupForPlayer(playerNum, amount) {
@@ -285,14 +366,20 @@ function showManaPopupForPlayer(playerNum, amount) {
   const target = document.querySelector(side + ' .fp-name');
   const el = document.createElement('div');
   el.className = 'damage-popup mana-popup';
-  el.textContent = '+' + amount + ' ⬡';
+  el.textContent = '+' + amount + ' \u2B21';
   if (target) {
     const rect = target.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2) + 'px';
     el.style.top = (rect.top + rect.height * 0.4) + 'px';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1200);
+  setTimeout(() => el.remove(), 900);
+  // Bump the mana display
+  const manaEl = document.querySelector('.mana-display');
+  if (manaEl) {
+    manaEl.classList.add('mana-bump');
+    setTimeout(() => manaEl.classList.remove('mana-bump'), 400);
+  }
 }
 
 // TYPE_PARTICLE_COLORS now imported from shared/constants.js at top of file
@@ -321,6 +408,12 @@ const animCtx = {
   getPokemonSelector,
   findPokemonSelector,
   captureHpState: () => { captureHpState(); _hpPreCaptured = true; },
+  screenShake,
+  koFlash,
+  spawnHealSparkles,
+  spawnStatusParticles,
+  showMissPopup,
+  showBlockedPopup,
   TYPE_PARTICLE_COLORS,
 };
 
@@ -755,7 +848,8 @@ function showDamagePopup(amount, mult, targetSelector) {
     el.style.top = '35%';
   }
   document.body.appendChild(el);
-  const removeDelay = amount >= 100 ? 2000 : amount >= 50 ? 1400 : 1000;
+  // Popup lifetime matches CSS animation duration
+  const removeDelay = amount >= 100 ? 1600 : amount >= 50 ? 1200 : 900;
   setTimeout(() => el.remove(), removeDelay);
 
   if (mult > 1) {
@@ -764,14 +858,14 @@ function showDamagePopup(amount, mult, targetSelector) {
     eff.textContent = 'Super Effective!';
     eff.style.left = el.style.left; eff.style.top = (parseInt(el.style.top) - 30) + 'px';
     document.body.appendChild(eff);
-    setTimeout(() => eff.remove(), 1500);
+    setTimeout(() => eff.remove(), 1300);
   } else if (mult < 1) {
     const eff = document.createElement('div');
     eff.className = 'eff-text nve';
     eff.textContent = 'Resisted...';
     eff.style.left = el.style.left; eff.style.top = (parseInt(el.style.top) - 30) + 'px';
     document.body.appendChild(eff);
-    setTimeout(() => eff.remove(), 1500);
+    setTimeout(() => eff.remove(), 1300);
   }
 }
 

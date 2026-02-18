@@ -62,8 +62,9 @@ var AnimQueue = (function() {
   // animCtx = {
   //   renderBattle, delay, animateEl, spawnParticlesAtEl,
   //   showDamagePopup, showDamagePopupAt, showEnergyPopup, showManaPopup,
-  //   showTurnOverlay, focusOnActives,
-  //   getPokemonSelector, findPokemonSelector,
+  //   showTurnOverlay, focusOnActives, spawnHealSparkles, spawnStatusParticles,
+  //   getPokemonSelector, findPokemonSelector, screenShake, koFlash,
+  //   captureHpState,
   //   TYPE_PARTICLE_COLORS
   // }
   // ============================================================
@@ -121,32 +122,51 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         break;
 
+      // ==========================================================
+      // ATTACK DECLARATION
+      // ==========================================================
       case 'attack_declare':
         ctx.renderBattle();
         ctx.focusOnActives();
-        await ctx.delay(300);
-        // Use getPokemonSelector which respects _replayPov via meNum()
+        await ctx.delay(250);
         var atkSel = ctx.getPokemonSelector(evt.player || (window.G ? window.G.currentPlayer : 1), -1);
-        ctx.animateEl(atkSel, 'attacking', 400);
-        await ctx.delay(400);
+        ctx.animateEl(atkSel, 'attacking', 500);
+        await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // DAMAGE (main attack damage)
+      // ==========================================================
       case 'damage':
-        // Capture HP state BEFORE applying damage so animateHpBars sees the change
         if (ctx.captureHpState) ctx.captureHpState();
         var dmgBenchIdx = (evt.benchIdx !== undefined && evt.benchIdx !== null) ? evt.benchIdx : -1;
         var dmgSel = null;
         if (evt.targetOwner) dmgSel = ctx.getPokemonSelector(evt.targetOwner, dmgBenchIdx);
         if (!dmgSel && ctx.findPokemonSelector && evt.target) dmgSel = ctx.findPokemonSelector(evt.target);
+
+        // Show popup + shake + particles simultaneously
         ctx.showDamagePopup(evt.amount, evt.mult, dmgSel);
-        var shakeClass = evt.amount >= 100 ? 'heavy-shake' : evt.amount >= 50 ? 'hit-shake' : 'light-shake';
-        var shakeDur = evt.amount >= 100 ? 700 : evt.amount >= 50 ? 500 : 300;
+
+        // Tiered shake: light / heavy / massive
+        var shakeClass, shakeDur;
+        if (evt.amount >= 100) {
+          shakeClass = 'hit-shake-massive'; shakeDur = 800;
+          if (ctx.screenShake) ctx.screenShake();
+        } else if (evt.amount >= 50) {
+          shakeClass = 'hit-shake-heavy'; shakeDur = 600;
+        } else {
+          shakeClass = 'light-shake'; shakeDur = 400;
+        }
         ctx.animateEl(dmgSel, shakeClass, shakeDur);
+
+        // Type-colored particles
         if (ctx.TYPE_PARTICLE_COLORS && evt.attackerType) {
           var color = ctx.TYPE_PARTICLE_COLORS[evt.attackerType] || '#ef4444';
-          var count = evt.amount >= 100 ? 22 : evt.amount >= 50 ? 18 : 14;
-          ctx.spawnParticlesAtEl(dmgSel, color, count, { spread: evt.amount >= 100 ? 75 : 55 });
+          var count = evt.amount >= 100 ? 24 : evt.amount >= 50 ? 16 : 10;
+          var spread = evt.amount >= 100 ? 80 : evt.amount >= 50 ? 60 : 45;
+          ctx.spawnParticlesAtEl(dmgSel, color, count, { spread: spread });
         }
+
         // Progressively apply damage to snapshot state so HP bars update
         if (typeof window !== 'undefined' && window.G) {
           var dmgTarget = null;
@@ -161,9 +181,13 @@ var AnimQueue = (function() {
           }
         }
         ctx.renderBattle();
-        await ctx.delay(evt.amount >= 100 ? 1400 : evt.amount >= 50 ? 1100 : 900);
+        // Wait matches the shake duration + a small buffer for popup
+        await ctx.delay(evt.amount >= 100 ? 1200 : evt.amount >= 50 ? 900 : 650);
         break;
 
+      // ==========================================================
+      // SELF DAMAGE (recoil from own effects)
+      // ==========================================================
       case 'selfDamage':
         if (ctx.captureHpState) ctx.captureHpState();
         var selfSel = null;
@@ -172,7 +196,7 @@ var AnimQueue = (function() {
         if (!selfSel) selfSel = '#youField .active-slot';
         if (selfSel) {
           ctx.showDamagePopupAt(evt.amount, selfSel, false);
-          ctx.animateEl(selfSel, 'hit-shake', 500);
+          ctx.animateEl(selfSel, 'recoil-shake', 400);
         }
         // Progressively apply self damage
         if (typeof window !== 'undefined' && window.G && evt.amount) {
@@ -183,13 +207,20 @@ var AnimQueue = (function() {
         await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // STATUS DAMAGE (poison/burn tick)
+      // ==========================================================
       case 'statusDamage':
       case 'status_tick':
         if (ctx.captureHpState) ctx.captureHpState();
         var statusOwnerNum = evt.owner || evt.targetOwner;
         var statusSel = ctx.getPokemonSelector(statusOwnerNum, -1);
         var statusColor = evt.status === 'poison' ? '#A33EA1' : '#EE8130';
-        ctx.spawnParticlesAtEl(statusSel, statusColor, 10, { spread: 40, size: 5 });
+        if (ctx.spawnStatusParticles) {
+          ctx.spawnStatusParticles(statusSel, evt.status === 'poison' ? 'poison' : 'burn');
+        } else {
+          ctx.spawnParticlesAtEl(statusSel, statusColor, 10, { spread: 40, size: 5 });
+        }
         ctx.animateEl(statusSel, 'status-apply', 500);
         var statusDmgAmt = evt.damage || evt.amount;
         ctx.showDamagePopupAt(statusDmgAmt, statusSel, false);
@@ -206,6 +237,9 @@ var AnimQueue = (function() {
         await ctx.delay(600);
         break;
 
+      // ==========================================================
+      // KO (pokemon fainted)
+      // ==========================================================
       case 'ko':
         // Use isActive/benchIdx from event when available (precise), else infer from state
         var koIsActive = evt.isActive !== undefined ? evt.isActive : true;
@@ -224,9 +258,15 @@ var AnimQueue = (function() {
           }
         }
         var koSel = ctx.getPokemonSelector(evt.owner, koIsActive ? -1 : koBenchIdx);
-        ctx.animateEl(koSel, 'ko-fall', 600);
-        ctx.spawnParticlesAtEl(koSel, '#ef4444', 20, { spread: 70, size: 4 });
-        await ctx.delay(600);
+
+        // KO flash on the field side
+        if (ctx.koFlash) ctx.koFlash(evt.owner);
+
+        // KO fall animation + red particle burst
+        ctx.animateEl(koSel, 'ko-fall', 700);
+        ctx.spawnParticlesAtEl(koSel, '#ef4444', 24, { spread: 80, size: 5 });
+        await ctx.delay(700);
+
         // Remove the KO'd pokemon from snapshot state so re-render shows it gone
         if (typeof window !== 'undefined' && window.G && evt.owner) {
           var koOwner = window.G.players[evt.owner];
@@ -247,18 +287,25 @@ var AnimQueue = (function() {
           }
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(350);
         break;
 
+      // ==========================================================
+      // STATUS APPLIED
+      // ==========================================================
       case 'statusApplied':
         var statApplySel = null;
         if (evt.owner) statApplySel = ctx.getPokemonSelector(evt.owner, -1);
         if (!statApplySel && ctx.findPokemonSelector && evt.pokemon) statApplySel = ctx.findPokemonSelector(evt.pokemon);
         if (!statApplySel) statApplySel = '#oppField .active-slot';
-        var statColor = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
         if (statApplySel) {
           ctx.animateEl(statApplySel, 'status-apply', 500);
-          ctx.spawnParticlesAtEl(statApplySel, statColor[evt.status] || '#999', 10, { spread: 40 });
+          if (ctx.spawnStatusParticles) {
+            ctx.spawnStatusParticles(statApplySel, evt.status);
+          } else {
+            var statColor = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
+            ctx.spawnParticlesAtEl(statApplySel, statColor[evt.status] || '#999', 10, { spread: 40 });
+          }
         }
         // Progressively apply status to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.status) {
@@ -271,12 +318,17 @@ var AnimQueue = (function() {
         await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // STATUS CURE
+      // ==========================================================
       case 'status_cure':
         var cureSel = null;
         if (evt.owner) cureSel = ctx.getPokemonSelector(evt.owner, -1);
         if (!cureSel && ctx.findPokemonSelector && evt.pokemon) cureSel = ctx.findPokemonSelector(evt.pokemon);
         if (cureSel) {
           ctx.animateEl(cureSel, 'status-cure', 500);
+          // Green sparkle particles for cure
+          ctx.spawnParticlesAtEl(cureSel, '#86efac', 8, { spread: 35, size: 3 });
         }
         // Progressively clear status from snapshot state
         if (typeof window !== 'undefined' && window.G) {
@@ -290,9 +342,12 @@ var AnimQueue = (function() {
           }
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // HEAL
+      // ==========================================================
       case 'heal':
       case 'ability_heal':
       case 'item_heal':
@@ -304,6 +359,12 @@ var AnimQueue = (function() {
         if (healSel) {
           ctx.showDamagePopupAt(evt.amount, healSel, true);
           ctx.animateEl(healSel, 'heal-pulse', 500);
+          // Green sparkle particles for heal
+          if (ctx.spawnHealSparkles) {
+            ctx.spawnHealSparkles(healSel);
+          } else {
+            ctx.spawnParticlesAtEl(healSel, '#4ade80', 8, { spread: 35, size: 3 });
+          }
         }
         // Progressively apply heal to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.amount) {
@@ -314,16 +375,19 @@ var AnimQueue = (function() {
           }
         }
         ctx.renderBattle();
-        await ctx.delay(500);
+        await ctx.delay(550);
         break;
 
+      // ==========================================================
+      // ITEM PROC
+      // ==========================================================
       case 'item_proc':
       case 'itemProc':
         var ipSel = ctx.findPokemonSelector ? ctx.findPokemonSelector(evt.pokemon) : null;
         if (ipSel) {
-          ctx.animateEl(ipSel, 'item-proc', 600);
+          ctx.animateEl(ipSel, 'item-proc', 500);
           if (evt.effect === 'energyGain' && evt.amount) {
-            ctx.showEnergyPopup(ipSel, '+' + evt.amount + ' ⚡');
+            ctx.showEnergyPopup(ipSel, '+' + evt.amount + ' \u26A1');
           }
           if (evt.effect === 'heal' && evt.amount) {
             ctx.showDamagePopupAt(evt.amount, ipSel, true);
@@ -336,6 +400,9 @@ var AnimQueue = (function() {
         await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // REACTIVE DAMAGE (thorns, rough skin, etc.)
+      // ==========================================================
       case 'reactiveDamage':
         if (ctx.captureHpState) ctx.captureHpState();
         var rdSel = null;
@@ -343,7 +410,8 @@ var AnimQueue = (function() {
         if (!rdSel && ctx.findPokemonSelector && evt.target) rdSel = ctx.findPokemonSelector(evt.target);
         if (rdSel) {
           ctx.showDamagePopupAt(evt.amount, rdSel, false);
-          ctx.animateEl(rdSel, 'hit-shake', 500);
+          ctx.animateEl(rdSel, 'recoil-shake', 400);
+          ctx.spawnParticlesAtEl(rdSel, '#a855f7', 8, { spread: 35 });
         }
         // Progressively apply reactive damage
         if (typeof window !== 'undefined' && window.G && evt.amount) {
@@ -351,34 +419,43 @@ var AnimQueue = (function() {
           if (rdPk) { rdPk.damage = (rdPk.damage || 0) + evt.amount; rdPk.hp = Math.max(0, rdPk.maxHp - rdPk.damage); }
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(500);
         break;
 
+      // ==========================================================
+      // RECOIL DAMAGE (item/attack self-recoil)
+      // ==========================================================
       case 'recoilDamage':
         if (ctx.captureHpState) ctx.captureHpState();
         var rcSel = null;
         if (evt.owner) rcSel = ctx.getPokemonSelector(evt.owner, -1);
         if (!rcSel && ctx.findPokemonSelector && evt.pokemon) rcSel = ctx.findPokemonSelector(evt.pokemon);
         if (!rcSel) rcSel = '#youField .active-slot';
-        if (rcSel) ctx.showDamagePopupAt(evt.amount, rcSel, false);
+        if (rcSel) {
+          ctx.showDamagePopupAt(evt.amount, rcSel, false);
+          ctx.animateEl(rcSel, 'recoil-shake', 400);
+        }
         // Progressively apply recoil damage
         if (typeof window !== 'undefined' && window.G && evt.amount) {
           var rcPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (rcPk) { rcPk.damage = (rcPk.damage || 0) + evt.amount; rcPk.hp = Math.max(0, rcPk.maxHp - rcPk.damage); }
         }
         ctx.renderBattle();
-        await ctx.delay(300);
+        await ctx.delay(450);
         break;
 
+      // ==========================================================
+      // ENERGY GAIN
+      // ==========================================================
       case 'energy_gain':
       case 'energyGain':
         var egSel = null;
         if (evt.owner) egSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
         if (!egSel && ctx.findPokemonSelector && evt.pokemon) egSel = ctx.findPokemonSelector(evt.pokemon);
         if (egSel) {
-          ctx.showEnergyPopup(egSel, '+' + (evt.amount || 1) + ' ⚡');
+          ctx.showEnergyPopup(egSel, '+' + (evt.amount || 1) + ' \u26A1');
           ctx.animateEl(egSel, 'energy-gain', 400);
-          ctx.spawnParticlesAtEl(egSel, '#F7D02C', 6, { spread: 30, size: 4 });
+          ctx.spawnParticlesAtEl(egSel, '#F7D02C', 8, { spread: 35, size: 3 });
         }
         // Progressively apply energy gain to snapshot state
         if (typeof window !== 'undefined' && window.G) {
@@ -386,9 +463,12 @@ var AnimQueue = (function() {
           if (egPk) egPk.energy = (egPk.energy || 0) + (evt.amount || 1);
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(450);
         break;
 
+      // ==========================================================
+      // MANA GAIN
+      // ==========================================================
       case 'mana_gain':
       case 'manaGain':
         if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
@@ -398,12 +478,15 @@ var AnimQueue = (function() {
           window.G.players[evt.player].mana += evt.amount;
         }
         ctx.renderBattle();
-        await ctx.delay(300);
+        await ctx.delay(350);
         break;
 
+      // ==========================================================
+      // TURN SWITCH
+      // ==========================================================
       case 'switch_turn':
         ctx.showTurnOverlay(evt.playerName || ('Player ' + evt.player + "'s Turn"));
-        await ctx.delay(1000);
+        await ctx.delay(1100);
         // Flip the hot-seat POV to the new player right when this event fires,
         // so the re-render shows the board from the new player's perspective.
         if (typeof window !== 'undefined' && window._replayPov != null) {
@@ -419,7 +502,7 @@ var AnimQueue = (function() {
 
       case 'extra_turn_start':
         ctx.showTurnOverlay((evt.playerName || ('Player ' + evt.player)) + ' gets an extra turn!');
-        await ctx.delay(1000);
+        await ctx.delay(1100);
         if (typeof window !== 'undefined' && window._replayPov != null) {
           window._replayPov = evt.player;
         }
@@ -430,6 +513,9 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         break;
 
+      // ==========================================================
+      // SWITCH ACTIVE (retreat / swap)
+      // ==========================================================
       case 'switch_active':
         if (typeof window !== 'undefined' && window.G && evt.player) {
           var swOwner = window.G.players[evt.player];
@@ -445,17 +531,21 @@ var AnimQueue = (function() {
         var switchSide = '#youField';
         if (typeof window !== 'undefined' && window.G && evt.player !== window.G.currentPlayer) switchSide = '#oppField';
         ctx.renderBattle();
-        ctx.animateEl(switchSide + ' .active-slot', 'slide-in', 350);
-        await ctx.delay(500);
+        ctx.animateEl(switchSide + ' .active-slot', 'slide-in', 400);
+        await ctx.delay(450);
         break;
 
+      // ==========================================================
+      // EVENTS WITH NEW VISUAL FEEDBACK
+      // ==========================================================
       case 'retreat_pending':
         ctx.renderBattle();
+        await ctx.delay(200);
         break;
 
       case 'forceSwitch':
         ctx.renderBattle();
-        await ctx.delay(500);
+        await ctx.delay(400);
         break;
 
       case 'win':
@@ -473,15 +563,27 @@ var AnimQueue = (function() {
 
       case 'play_pokemon':
         ctx.renderBattle();
-        await ctx.delay(300);
+        // Animate the newly played pokemon entering the field
+        if (evt.player && evt.benchIdx !== undefined) {
+          var ppSel = ctx.getPokemonSelector(evt.player, evt.benchIdx);
+          ctx.animateEl(ppSel, 'pokemon-enter', 500);
+        } else if (evt.player) {
+          // Might be active slot
+          var ppActiveSel = ctx.getPokemonSelector(evt.player, -1);
+          ctx.animateEl(ppActiveSel, 'pokemon-enter', 500);
+        }
+        await ctx.delay(400);
         break;
 
       case 'ability_effect':
       case 'ability_targeting':
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(350);
         break;
 
+      // ==========================================================
+      // ABILITY DAMAGE
+      // ==========================================================
       case 'ability_damage':
         if (ctx.captureHpState) ctx.captureHpState();
         var abSel = null;
@@ -489,7 +591,8 @@ var AnimQueue = (function() {
         if (!abSel && ctx.findPokemonSelector && evt.target) abSel = ctx.findPokemonSelector(evt.target);
         if (abSel) {
           ctx.showDamagePopupAt(evt.amount, abSel, false);
-          ctx.animateEl(abSel, 'hit-shake', 450);
+          ctx.animateEl(abSel, 'recoil-shake', 400);
+          ctx.spawnParticlesAtEl(abSel, '#c084fc', 8, { spread: 35 });
         }
         if (typeof window !== 'undefined' && window.G && evt.amount) {
           var adPk = _findPokemonObj(evt.target, evt.owner);
@@ -499,69 +602,128 @@ var AnimQueue = (function() {
           }
         }
         ctx.renderBattle();
+        await ctx.delay(500);
+        break;
+
+      // ==========================================================
+      // DISCARD ITEM
+      // ==========================================================
+      case 'discard_item':
+        var diSel = null;
+        if (evt.owner) diSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx !== undefined ? evt.benchIdx : -1);
+        if (!diSel && ctx.findPokemonSelector && evt.pokemon) diSel = ctx.findPokemonSelector(evt.pokemon);
+        if (diSel) {
+          ctx.animateEl(diSel, 'item-discard', 400);
+        }
+        ctx.renderBattle();
+        await ctx.delay(350);
+        break;
+
+      // ==========================================================
+      // CONFUSION FAIL
+      // ==========================================================
+      case 'confusion_fail':
+        var cfSel = null;
+        var cfOwner = evt.owner || evt.player || (window.G ? window.G.currentPlayer : 1);
+        cfSel = ctx.getPokemonSelector(cfOwner, -1);
+        if (cfSel) {
+          ctx.animateEl(cfSel, 'confusion-wobble', 600);
+          if (ctx.spawnStatusParticles) {
+            ctx.spawnStatusParticles(cfSel, 'confusion');
+          } else {
+            ctx.spawnParticlesAtEl(cfSel, '#eab308', 8, { spread: 35, size: 4 });
+          }
+          // Show "Confused!" miss text
+          if (ctx.showMissPopup) ctx.showMissPopup(cfSel, 'Confused!');
+        }
+        ctx.renderBattle();
+        await ctx.delay(600);
+        break;
+
+      // ==========================================================
+      // FILTERED (immune / blocked)
+      // ==========================================================
+      case 'filtered':
+        var fSel = null;
+        if (evt.targetOwner) fSel = ctx.getPokemonSelector(evt.targetOwner, -1);
+        if (!fSel && ctx.findPokemonSelector && evt.target) fSel = ctx.findPokemonSelector(evt.target);
+        if (fSel) {
+          ctx.animateEl(fSel, 'no-damage', 300);
+          if (ctx.showBlockedPopup) ctx.showBlockedPopup(fSel, 'Blocked!');
+        }
+        ctx.renderBattle();
+        await ctx.delay(500);
+        break;
+
+      // ==========================================================
+      // NO DAMAGE
+      // ==========================================================
+      case 'noDamage':
+        var ndSel = null;
+        if (evt.targetOwner) ndSel = ctx.getPokemonSelector(evt.targetOwner, -1);
+        if (!ndSel) {
+          // Default to opponent active
+          var oppNum = (typeof window !== 'undefined' && window.G) ? (window.G.currentPlayer === 1 ? 2 : 1) : 2;
+          ndSel = ctx.getPokemonSelector(oppNum, -1);
+        }
+        if (ndSel) {
+          ctx.animateEl(ndSel, 'no-damage', 300);
+          if (ctx.showMissPopup) ctx.showMissPopup(ndSel, 'No Damage');
+        }
+        ctx.renderBattle();
         await ctx.delay(450);
         break;
 
-      case 'discard_item':
-        ctx.renderBattle();
-        break;
-
-      case 'confusion_fail':
-        ctx.renderBattle();
-        await ctx.delay(500);
-        break;
-
-      case 'filtered':
-        ctx.renderBattle();
-        await ctx.delay(500);
-        break;
-
-      case 'noDamage':
-        ctx.renderBattle();
-        break;
-
+      // ==========================================================
+      // ENERGY STRIP (attacker steals/strips defender energy)
+      // ==========================================================
       case 'energyStrip':
-        // Progressively apply energy strip to defender
         var esSel = null;
         if (evt.targetOwner) esSel = ctx.getPokemonSelector(evt.targetOwner, -1);
         if (!esSel && ctx.findPokemonSelector && evt.pokemon) esSel = ctx.findPokemonSelector(evt.pokemon);
         if (esSel) {
           ctx.showEnergyPopup(esSel, '-' + (evt.amount || 1) + ' \u26A1');
-          ctx.animateEl(esSel, 'hit-shake', 350);
+          ctx.animateEl(esSel, 'energy-drain', 400);
+          ctx.spawnParticlesAtEl(esSel, '#f97316', 8, { spread: 35, size: 3 });
         }
         if (typeof window !== 'undefined' && window.G) {
           var esPk = _findPokemonObj(evt.pokemon, evt.targetOwner);
           if (esPk) esPk.energy = Math.max(0, (esPk.energy || 0) - (evt.amount || 1));
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(450);
         break;
 
+      // ==========================================================
+      // SELF ENERGY LOSS
+      // ==========================================================
       case 'selfEnergyLoss':
-        // Progressively apply self energy loss
         var selSel = null;
         if (evt.owner) selSel = ctx.getPokemonSelector(evt.owner, -1);
         if (!selSel && ctx.findPokemonSelector && evt.pokemon) selSel = ctx.findPokemonSelector(evt.pokemon);
         if (selSel) {
           ctx.showEnergyPopup(selSel, '-' + (evt.amount || 1) + ' \u26A1');
+          ctx.animateEl(selSel, 'energy-drain', 400);
         }
         if (typeof window !== 'undefined' && window.G) {
           var selPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (selPk) selPk.energy = Math.max(0, (selPk.energy || 0) - (evt.amount || 1));
         }
         ctx.renderBattle();
-        await ctx.delay(350);
+        await ctx.delay(400);
         break;
 
+      // ==========================================================
+      // BENCH DAMAGE (collateral)
+      // ==========================================================
       case 'selfBenchDmg':
-        // Progressively apply bench damage
         if (ctx.captureHpState) ctx.captureHpState();
         var sbdSel = null;
         if (evt.owner && evt.benchIdx !== undefined) sbdSel = ctx.getPokemonSelector(evt.owner, evt.benchIdx);
         if (!sbdSel && ctx.findPokemonSelector && evt.pokemon) sbdSel = ctx.findPokemonSelector(evt.pokemon);
         if (sbdSel) {
           ctx.showDamagePopupAt(evt.amount, sbdSel, false);
-          ctx.animateEl(sbdSel, 'hit-shake', 400);
+          ctx.animateEl(sbdSel, 'recoil-shake', 400);
         }
         if (typeof window !== 'undefined' && window.G && evt.amount) {
           var sbdPk = _findPokemonObj(evt.pokemon, evt.owner, evt.benchIdx);
@@ -574,22 +736,24 @@ var AnimQueue = (function() {
         await ctx.delay(450);
         break;
 
+      // ==========================================================
+      // BATON PASS (energy transfer on KO)
+      // ==========================================================
       case 'baton_pass':
-        // Progressively apply baton pass energy gain
         var bpSel = null;
         if (evt.owner) bpSel = ctx.getPokemonSelector(evt.owner, -1);
         if (!bpSel && ctx.findPokemonSelector && evt.pokemon) bpSel = ctx.findPokemonSelector(evt.pokemon);
         if (bpSel) {
           ctx.showEnergyPopup(bpSel, '+' + (evt.energy || 0) + ' \u26A1');
           ctx.animateEl(bpSel, 'energy-gain', 400);
-          ctx.spawnParticlesAtEl(bpSel, '#F7D02C', 6, { spread: 30, size: 4 });
+          ctx.spawnParticlesAtEl(bpSel, '#F7D02C', 8, { spread: 35, size: 3 });
         }
         if (typeof window !== 'undefined' && window.G) {
           var bpPk = _findPokemonObj(evt.pokemon, evt.owner);
           if (bpPk) bpPk.energy = Math.min((bpPk.energy || 0) + (evt.energy || 0), 5);
         }
         ctx.renderBattle();
-        await ctx.delay(400);
+        await ctx.delay(450);
         break;
 
       default:
