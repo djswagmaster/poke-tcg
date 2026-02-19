@@ -153,8 +153,8 @@ function runOnPlayAbility(G, playerNum, pk) {
   if (!data || !data.ability || data.ability.type !== 'onPlay') return;
   if (data.ability.key === 'dimensionExpansion') {
     var p = G.players[playerNum];
-    p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 1;
-    addLog(G, pk.name + ' expands your bench capacity by 1!', 'effect');
+    p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 2;
+    addLog(G, pk.name + ' expands your bench capacity by 2!', 'effect');
     G.events.push({ type: 'ability_effect', ability: 'dimensionExpansion', pokemon: pk.name, player: playerNum, maxBench: p.maxBench });
   }
   // Keyring (Klefki): item attachment is handled by doPlayPokemon via extraItemIndices

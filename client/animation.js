@@ -487,8 +487,16 @@ var AnimQueue = (function() {
       // ==========================================================
       case 'mana_gain':
       case 'manaGain':
-        if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
-        else ctx.showManaPopup(evt.amount);
+        // Only show popup for local player (offline) or my player (online)
+        var isOnline = typeof window !== 'undefined' && window.isOnline;
+        var myPlayerNum = typeof window !== 'undefined' && window.myPlayerNum;
+        var shouldShowPopup = !isOnline || (evt.player === myPlayerNum);
+        
+        if (shouldShowPopup) {
+          if (ctx.showManaPopupForPlayer && evt.player) ctx.showManaPopupForPlayer(evt.player, evt.amount);
+          else ctx.showManaPopup(evt.amount);
+        }
+        
         // Progressively apply mana gain to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.player) {
           window.G.players[evt.player].mana += evt.amount;

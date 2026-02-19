@@ -56,7 +56,7 @@ var POKEMON_DB = [
     attacks:[{name:"Gift Delivery",energy:2,baseDmg:0,desc:"Each bench +1 energy",fx:"benchEnergyAll"}]},
 
   {name:"Dialga",types:["Steel","Dragon"],cost:6,hp:280,weakness:["Fighting","Dragon"],resistance:["Ghost","Grass"],
-    attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 4 energy. Take another turn after this one",fx:"selfEnergyLoss:4,extraTurn"}]},
+    attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 2 energy. Take another turn after this one. Can't attack during your next turn",fx:"selfEnergyLoss:2,extraTurn,lockAttack"}]},
 
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
     ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise",activeOnly:true},
@@ -129,7 +129,7 @@ var POKEMON_DB = [
 
   {name:"Leafeon",types:["Grass"],cost:4,hp:220,weakness:["Bug"],resistance:["Water"],
     ability:{name:"Leaf Boost",desc:"Once during your turn, grant 1 of your Pokemon +1 energy. If you do, your turn ends",type:"active",key:"leafBoost",targeted:true},
-    attacks:[{name:"Energy Blade",energy:3,baseDmg:30,desc:"+20 per own energy",fx:"scaleOwn:20"}]},
+    attacks:[{name:"Energy Blade",energy:1,baseDmg:30,desc:"+20 per own energy",fx:"scaleOwn:20"}]},
 
   {name:"Espeon",types:["Psychic"],cost:4,hp:190,weakness:["Dark"],resistance:["Psychic"],
     ability:{name:"Brilliant Shining",desc:"Once during your turn, both players gain 1 mana",type:"active",key:"brilliantShining"},
@@ -241,7 +241,7 @@ var POKEMON_DB = [
     attacks:[{name:"Sparky Generator",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
 
   {name:"Palkia",types:["Water","Dragon"],cost:6,hp:280,weakness:["Electric","Dragon"],resistance:["Fire","Grass"],
-    ability:{name:"Dimension Expansion",desc:"On play: permanently increase your max bench size by 1",type:"onPlay",key:"dimensionExpansion"},
+    ability:{name:"Dimension Expansion",desc:"On play: permanently increase your max bench size by 2",type:"onPlay",key:"dimensionExpansion"},
     attacks:[{name:"Spacial Rend",energy:4,baseDmg:100,desc:"Damage ignores resistance/reduction and defensive effects",fx:"ignoreReduction"}]},
 
   {name:"Porygon2",types:["Normal"],cost:4,hp:220,weakness:[],resistance:["Ghost"],
