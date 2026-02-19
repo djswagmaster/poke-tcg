@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(ls:*)",
+      "Bash(base64:*)",
+      "Bash(dd:*)",
+      "Bash(python -c:*)",
+      "Bash(node -e:*)",
+      "Bash(node --check:*)",
+      "Bash(git pull:*)",
+      "Bash(node -c:*)",
+      "Bash(node:*)",
+      "Bash(gh pr create:*)",
+      "Bash(where:*)",
+      "Bash(where.exe:*)"
+    ]
+  }
+}

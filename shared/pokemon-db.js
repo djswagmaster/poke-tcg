@@ -17,11 +17,11 @@ var POKEMON_DB = [
     attacks:[{name:"Frost Over",energy:3,baseDmg:50,desc:"+10 per energy on defender",fx:"scaleDef:10"}]},
 
   {name:"Alolan Raichu",types:["Electric","Psychic"],cost:4,hp:150,weakness:["Ground","Dark"],resistance:["Steel","Fighting"],
-    ability:{name:"Spark Surfer",desc:"Free retreat once per turn",type:"passive",key:"sparkSurfer"},
+    ability:{name:"Spark Surfer",desc:"Free retreat once per turn",type:"active",key:"sparkSurfer"},
     attacks:[{name:"Psychic",energy:3,baseDmg:20,desc:"+20 per energy on defender",fx:"scaleDef:20"}]},
 
   {name:"Arceus",types:["Normal"],cost:6,hp:300,weakness:[],resistance:["Ghost"],
-    ability:{name:"Creation",desc:"Spend 1 mana -> gain 2 mana",type:"active",key:"creation"},
+    ability:{name:"Creation",desc:"Spend 1 mana -> gain 2 mana",type:"active",key:"creation",activeOnly:true},
     attacks:[{name:"Judgement",energy:3,baseDmg:120,desc:"",fx:""}]},
 
   {name:"Archeops",types:["Rock","Flying"],cost:5,hp:240,weakness:["Water","Electric"],resistance:["Fire","Grass"],
@@ -59,7 +59,7 @@ var POKEMON_DB = [
     attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 4 energy. Take another turn after this one",fx:"selfEnergyLoss:4,extraTurn"}]},
 
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
-    ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise"},
+    ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise",activeOnly:true},
     attacks:[{name:"Slap",energy:2,baseDmg:30,desc:"",fx:""}]},
 
   {name:"Drednaw",types:["Water","Rock"],cost:4,hp:200,weakness:["Electric","Water"],resistance:["Water","Flying"],
@@ -143,12 +143,20 @@ var POKEMON_DB = [
              {name:"Payback Impact",energy:4,baseDmg:100,desc:"200 if 100+ damage",fx:"payback:100"}]},
 
   {name:"Kricketune",types:["Bug"],cost:3,hp:170,weakness:["Fire"],resistance:["Fighting"],
-    ability:{name:"Befuddling Melody",desc:"Confuse Opp Active",type:"active",key:"lullaby"},
+    ability:{name:"Befuddling Melody",desc:"Confuse Opp Active",type:"active",key:"lullaby",activeOnly:true},
     attacks:[{name:"Excited Buzz",energy:1,baseDmg:30,desc:"+10 per own energy",fx:"scaleOwn:10"}]},
+
+  {name:"Klefki",types:["Fairy","Steel"],cost:4,hp:200,weakness:["Fire"],resistance:["Dragon"],
+    ability:{name:"Keyring",desc:"When you put this Pokemon into play, you may attach up to 3 Held Items to it",type:"onPlay",key:"keyring"},
+    attacks:[{name:"Fairy Wind",energy:3,baseDmg:70,desc:"",fx:""}]},
 
   {name:"Kyogre",types:["Water"],cost:6,hp:300,weakness:["Electric"],resistance:["Fire"],
     attacks:[{name:"Aqua Boost",energy:2,baseDmg:60,desc:"+1 energy",fx:"selfEnergy:1"},
              {name:"Origin Pulse",energy:4,baseDmg:120,desc:"+20 each opp bench",fx:"oppBenchDmg:20"}]},
+
+  {name:"Ledian",types:["Bug","Flying"],cost:3,hp:210,weakness:["Water","Ice"],resistance:["Fire","Ground"],
+    ability:{name:"Swift Strikes",desc:"Whenever this Pokemon attacks, it gains +1 Energy",type:"passive",key:"swiftStrikes"},
+    attacks:[{name:"Five Star Punch",energy:2,baseDmg:50,desc:"If exactly 5 Energy: +50 damage",fx:"maxEnergyBonus:50"}]},
 
   {name:"Lucario",types:["Fighting","Steel"],cost:4,hp:180,weakness:["Flying","Psychic"],resistance:["Poison","Rock"],
     attacks:[{name:"Jet Jab",energy:1,baseDmg:60,desc:"Ignores resistance",fx:"ignoreRes"},
@@ -157,6 +165,18 @@ var POKEMON_DB = [
   {name:"Lycanroc",types:["Rock"],cost:4,hp:210,weakness:["Steel"],resistance:["Flying"],
     ability:{name:"Bloodthirsty",desc:"1 mana: force opp to switch Active",type:"active",key:"bloodthirsty",activeOnly:true},
     attacks:[{name:"Finishing Fang",energy:3,baseDmg:60,desc:"+60 if defender <=120 HP",fx:"finishingFang"}]},
+
+  {name:"Magmar",types:["Fire"],cost:4,hp:190,weakness:["Water"],resistance:["Fairy"],
+    ability:{name:"Magma Sear",desc:"Opp burn recovery coin always tails; deal 10 extra damage",type:"passive",key:"magmaSear"},
+    attacks:[{name:"Lava Toss",energy:3,baseDmg:70,desc:"Burn",fx:"burn"}]},
+
+  {name:"Malamar",types:["Psychic"],cost:4,hp:200,weakness:["Fairy"],resistance:["Psychic"],
+    ability:{name:"Topsy Turvy",desc:"Opp confused coin flip always treated as tails",type:"passive",key:"topsyTurvy"},
+    attacks:[{name:"Psychic Jumble",energy:3,baseDmg:50,desc:"Confuse",fx:"confuse"}]},
+
+  {name:"Mamoswine",types:["Ice","Ground"],cost:4,hp:220,weakness:["Grass","Water"],resistance:["Ice","Electric"],
+    attacks:[{name:"Icicle Shard",energy:2,baseDmg:80,desc:"",fx:""},
+             {name:"Huge Earthquake",energy:4,baseDmg:100,desc:"30 to ALL bench (both sides)",fx:"allBenchDmg:30"}]},
 
   {name:"Marowak",types:["Ground"],cost:3,hp:200,weakness:["Grass"],resistance:["Electric"],
     attacks:[{name:"Bonemerang",energy:2,baseDmg:50,desc:"100 sustained",fx:"sustained:50"}]},
@@ -180,11 +200,11 @@ var POKEMON_DB = [
     attacks:[{name:"Steel Force",energy:4,baseDmg:80,desc:"-30 dmg next turn",fx:"selfShield:30"}]},
 
   {name:"Mega Audino",types:["Normal","Fairy"],cost:4,hp:260,weakness:["Poison"],resistance:["Ghost","Dragon"],
-    ability:{name:"Mega Checkup",desc:"1 mana: heal 30 + clear status",type:"active",key:"healingTouch",targeted:true},
+    ability:{name:"Mega Checkup",desc:"1 mana: heal 30 + clear status on Active",type:"active",key:"healingTouch"},
     attacks:[{name:"Careful Hearing",energy:3,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
 
   {name:"Mega Blaziken",types:["Fire","Fighting"],cost:5,hp:210,weakness:["Water","Flying"],resistance:["Grass","Steel"],
-    ability:{name:"Mega Speed",desc:"Grant self +1 energy (1/turn)",type:"active",key:"megaSpeed"},
+    ability:{name:"Mega Speed",desc:"Grant self +1 energy (1/turn)",type:"active",key:"megaSpeed",activeOnly:true},
     attacks:[{name:"Inferno Kick",energy:2,baseDmg:110,desc:"Lose 1 energy, Burn",fx:"selfEnergyLoss:1,burn"}]},
 
   {name:"Mega Mewtwo X",types:["Psychic","Fighting"],cost:7,hp:270,weakness:["Ghost","Flying"],resistance:["Fighting","Flying"],
@@ -207,7 +227,7 @@ var POKEMON_DB = [
 
   {name:"Muk",types:["Poison"],cost:4,hp:250,weakness:["Ground"],resistance:["Fairy"],
     attacks:[{name:"Nasty Goop",energy:2,baseDmg:10,desc:"Strip 1 energy + Poison",fx:"stripEnergy:1,poison"},
-             {name:"Split Sludge Bomb",energy:5,baseDmg:0,desc:"60 to 2 Pokemon, lose 2 energy",fx:"multiTarget:60:2"}]},
+             {name:"Split Sludge Bomb",energy:4,baseDmg:0,desc:"60 to 2 Pokemon, lose 2 energy",fx:"multiTarget:60:2"}]},
 
   {name:"Obstagoon",types:["Dark","Normal"],cost:4,hp:230,weakness:["Fairy"],resistance:["Ghost","Dark"],
     ability:{name:"Blockade",desc:"Opp Active can't retreat",type:"passive",key:"blockade"},
@@ -223,6 +243,9 @@ var POKEMON_DB = [
   {name:"Palkia",types:["Water","Dragon"],cost:6,hp:280,weakness:["Electric","Dragon"],resistance:["Fire","Grass"],
     ability:{name:"Dimension Expansion",desc:"On play: permanently increase your max bench size by 1",type:"onPlay",key:"dimensionExpansion"},
     attacks:[{name:"Spacial Rend",energy:4,baseDmg:100,desc:"Damage ignores resistance/reduction and defensive effects",fx:"ignoreReduction"}]},
+
+  {name:"Porygon2",types:["Normal"],cost:4,hp:220,weakness:[],resistance:["Ghost"],
+    attacks:[{name:"Power of 2",energy:2,baseDmg:0,desc:"Double your current Mana",fx:"doubleMana"}]},
 
   {name:"Psyduck",types:["Water"],cost:2,hp:140,weakness:["Electric"],resistance:["Fire"],
     attacks:[{name:"Confusion Wave",energy:2,baseDmg:60,desc:"Both actives confused",fx:"confuseBoth"}]},
@@ -250,6 +273,10 @@ var POKEMON_DB = [
     attacks:[{name:"Chili Bite",energy:1,baseDmg:40,desc:"Burn",fx:"burn"},
              {name:"Spicy Rage",energy:3,baseDmg:40,desc:"+dmg on self",fx:"berserk"}]},
 
+  {name:"Seviper",types:["Poison"],cost:4,hp:190,weakness:["Psychic"],resistance:["Grass"],
+    ability:{name:"Deadly Slice",desc:"Deal 30 damage to opp Active if it is Poisoned",type:"active",key:"deadlySlice"},
+    attacks:[{name:"Toxic Blade",energy:3,baseDmg:70,desc:"Poison",fx:"poison"}]},
+
   {name:"Shedinja",types:["Bug","Ghost"],cost:1,hp:60,weakness:["Fire","Dark"],resistance:["Fighting","Normal"],
     ability:{name:"Draining Vessel",desc:"On play: strip 2 from opp Active",type:"onPlay",key:"soulDrain"},
     attacks:[{name:"Tackle",energy:1,baseDmg:30,desc:"",fx:""}]},
@@ -267,7 +294,7 @@ var POKEMON_DB = [
              {name:"Brave Bird",energy:3,baseDmg:130,desc:"50 to self",fx:"selfDmg:50"}]},
 
   {name:"Slurpuff",types:["Fairy"],cost:4,hp:230,weakness:["Steel"],resistance:["Dragon"],
-    ability:{name:"Yummy Delivery",desc:"Bench +1 energy free/turn",type:"active",key:"yummyDelivery",targeted:true},
+    ability:{name:"Yummy Delivery",desc:"Bench +1 energy free/turn",type:"active",key:"yummyDelivery",targeted:true,activeOnly:true},
     attacks:[{name:"Slurp it Up",energy:4,baseDmg:70,desc:"Heal 30",fx:"healSelf:30"}]},
 
   {name:"Snorlax",types:["Normal"],cost:4,hp:270,weakness:[],resistance:["Ghost"],
@@ -306,7 +333,7 @@ var POKEMON_DB = [
              {name:"Moonlit Blade",energy:3,baseDmg:90,desc:"-10 per def energy",fx:"scaleDefNeg:10"}]},
 
   {name:"Unown",types:["Psychic"],cost:2,hp:130,weakness:["Dark"],resistance:["Fighting"],
-    ability:{name:"Ancient Energy",desc:"Active +1 energy, turn ends",type:"active",key:"hiddenPower",activeOnly:true},
+    ability:{name:"Ancient Energy",desc:"Active +1 energy, turn ends",type:"active",key:"hiddenPower"},
     attacks:[{name:"Psy Pulse",energy:1,baseDmg:40,desc:"",fx:""}]},
 
   {name:"Vileplume",types:["Grass","Poison"],cost:4,hp:200,weakness:["Ground"],resistance:["Water"],

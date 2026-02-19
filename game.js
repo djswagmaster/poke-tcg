@@ -129,12 +129,89 @@ function animateEl(selector, className, duration) {
   setTimeout(() => el.classList.remove(className), duration);
 }
 
+// Screen shake for massive damage — applies to the battle field container
+function screenShake() {
+  const field = document.querySelector('.battle-field');
+  if (field) {
+    field.classList.add('screen-shake');
+    setTimeout(() => field.classList.remove('screen-shake'), 500);
+  }
+}
+
+// KO flash overlay on a player's field side
+function koFlash(ownerPlayerNum) {
+  const side = ownerPlayerNum === meNum() ? '#youField' : '#oppField';
+  const el = document.querySelector(side);
+  if (!el) return;
+  const flash = document.createElement('div');
+  flash.className = 'ko-flash';
+  el.appendChild(flash);
+  setTimeout(() => flash.remove(), 600);
+}
+
+// Heal sparkle particles (green, rising)
+function spawnHealSparkles(targetSelector) {
+  const el = document.querySelector(targetSelector);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let container = document.querySelector('.particle-container');
+  if (!container) return;
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    const x = cx + (Math.random() - 0.5) * 50;
+    const y = cy + (Math.random() - 0.5) * 30;
+    p.className = 'particle';
+    p.style.cssText = `left:${x}px;top:${y}px;width:5px;height:5px;background:#4ade80;box-shadow:0 0 4px #4ade80;animation:healSparkle ${500 + Math.random()*300}ms ease-out forwards;animation-delay:${Math.random()*150}ms;`;
+    container.appendChild(p);
+    setTimeout(() => p.remove(), 1000);
+  }
+}
+
+// Status-specific particles
+function spawnStatusParticles(targetSelector, statusType) {
+  const colors = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
+  const color = colors[statusType] || '#999';
+  spawnParticlesAtEl(targetSelector, color, 10, { spread: 40, size: statusType === 'burn' ? 4 : 5 });
+}
+
+// "Miss" / "No Damage" floating text popup
+function showMissPopup(targetSelector, text) {
+  const target = document.querySelector(targetSelector);
+  const el = document.createElement('div');
+  el.className = 'damage-popup miss-popup';
+  el.textContent = text;
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+// "Blocked" floating text popup
+function showBlockedPopup(targetSelector, text) {
+  const target = document.querySelector(targetSelector);
+  const el = document.createElement('div');
+  el.className = 'damage-popup blocked-popup';
+  el.textContent = text;
+  if (target) {
+    const rect = target.getBoundingClientRect();
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
+  }
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
 function showTurnOverlay(text) {
   const overlay = document.createElement('div');
   overlay.className = 'turn-overlay';
   overlay.innerHTML = `<div class="turn-overlay-text">${text}</div>`;
   document.body.appendChild(overlay);
-  setTimeout(() => overlay.remove(), 1000);
+  setTimeout(() => overlay.remove(), 1100);
 }
 
 // Positioned damage popup near a target element
@@ -145,14 +222,14 @@ function showDamagePopupAt(amount, targetSelector, isHeal) {
   el.textContent = (isHeal ? '+' : '-') + amount;
   if (target) {
     const rect = target.getBoundingClientRect();
-    el.style.left = rect.left + rect.width / 2 + 'px';
-    el.style.top = rect.top + rect.height * 0.3 + 'px';
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = (rect.top + rect.height * 0.3) + 'px';
   } else {
     el.style.left = '50%';
     el.style.top = '35%';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1000);
+  setTimeout(() => el.remove(), 900);
 }
 
 // Particle burst effect
@@ -171,9 +248,9 @@ function spawnParticles(x, y, color, count, opts = {}) {
     p.className = 'particle';
     const dx = (Math.random() - 0.5) * spread * 2;
     const dy = (Math.random() - 0.5) * spread * 2;
-    p.style.cssText = `left:${x}px;top:${y}px;width:${size + Math.random()*4}px;height:${size + Math.random()*4}px;background:${color};--dx:${dx}px;--dy:${dy}px;animation:particleFly ${duration + Math.random()*200}ms ease-out forwards;animation-delay:${Math.random()*100}ms;`;
+    p.style.cssText = `left:${x}px;top:${y}px;width:${size + Math.random()*4}px;height:${size + Math.random()*4}px;background:${color};box-shadow:0 0 3px ${color};--dx:${dx}px;--dy:${dy}px;animation:particleFly ${duration + Math.random()*200}ms ease-out forwards;animation-delay:${Math.random()*100}ms;`;
     container.appendChild(p);
-    setTimeout(() => p.remove(), duration + 400);
+    setTimeout(() => p.remove(), duration + 500);
   }
 }
 
@@ -247,11 +324,12 @@ function animateHpBars() {
   }
 }
 
-// Energy gain popup (yellow)
+// Energy gain/loss popup (yellow)
 function showEnergyPopup(targetSelector, text) {
   const target = document.querySelector(targetSelector);
   const el = document.createElement('div');
-  el.className = 'damage-popup energy-popup';
+  const isDrain = text.startsWith('-');
+  el.className = 'damage-popup ' + (isDrain ? 'energy-drain' : 'energy-popup');
   el.textContent = text;
   if (target) {
     const rect = target.getBoundingClientRect();
@@ -259,7 +337,7 @@ function showEnergyPopup(targetSelector, text) {
     el.style.top = (rect.top + rect.height * 0.3) + 'px';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1500);
+  setTimeout(() => el.remove(), 900);
 }
 
 // Mana gain popup (cyan)
@@ -272,12 +350,15 @@ function showManaPopup(amount) {
     const rect = manaEl.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2) + 'px';
     el.style.top = (rect.top - 20) + 'px';
+    // Bump the mana display
+    manaEl.classList.add('mana-bump');
+    setTimeout(() => manaEl.classList.remove('mana-bump'), 400);
   } else {
     el.style.left = '50%';
     el.style.top = '80%';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1500);
+  setTimeout(() => el.remove(), 900);
 }
 
 function showManaPopupForPlayer(playerNum, amount) {
@@ -285,14 +366,20 @@ function showManaPopupForPlayer(playerNum, amount) {
   const target = document.querySelector(side + ' .fp-name');
   const el = document.createElement('div');
   el.className = 'damage-popup mana-popup';
-  el.textContent = '+' + amount + ' ⬡';
+  el.textContent = '+' + amount + ' \u2B21';
   if (target) {
     const rect = target.getBoundingClientRect();
     el.style.left = (rect.left + rect.width / 2) + 'px';
     el.style.top = (rect.top + rect.height * 0.4) + 'px';
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1200);
+  setTimeout(() => el.remove(), 900);
+  // Bump the mana display
+  const manaEl = document.querySelector('.mana-display');
+  if (manaEl) {
+    manaEl.classList.add('mana-bump');
+    setTimeout(() => manaEl.classList.remove('mana-bump'), 400);
+  }
 }
 
 // TYPE_PARTICLE_COLORS now imported from shared/constants.js at top of file
@@ -321,6 +408,12 @@ const animCtx = {
   getPokemonSelector,
   findPokemonSelector,
   captureHpState: () => { captureHpState(); _hpPreCaptured = true; },
+  screenShake,
+  koFlash,
+  spawnHealSparkles,
+  spawnStatusParticles,
+  showMissPopup,
+  showBlockedPopup,
   TYPE_PARTICLE_COLORS,
 };
 
@@ -379,6 +472,20 @@ function dispatchAction(action) {
 
 // Snapshot/restore helpers for animation replay.
 // Only captures the fields that change during processAction and affect rendering.
+// Deep-clone a Pokemon object so array fields (status, shields, types, etc.)
+// are not shared by reference between snapshot and live state.
+function clonePokemon(pk) {
+  if (!pk) return null;
+  var c = Object.assign({}, pk);
+  if (c.status) c.status = c.status.slice();
+  if (c.shields) c.shields = c.shields.slice();
+  if (c.types) c.types = c.types.slice();
+  if (c.weakness) c.weakness = c.weakness.slice();
+  if (c.resistance) c.resistance = c.resistance.slice();
+  if (c.heldItems) c.heldItems = c.heldItems.slice();
+  return c;
+}
+
 function snapshotGameState() {
   const snap = {
     currentPlayer: G.currentPlayer,
@@ -396,8 +503,8 @@ function snapshotGameState() {
       mana: p.mana,
       kos: p.kos,
       maxBench: p.maxBench,
-      active: p.active ? Object.assign({}, p.active) : null,
-      bench: p.bench.map(pk => Object.assign({}, pk)),
+      active: clonePokemon(p.active),
+      bench: p.bench.map(pk => clonePokemon(pk)),
       hand: p.hand.slice(),
       usedAbilities: Object.assign({}, p.usedAbilities),
     };
@@ -517,9 +624,8 @@ async function actionAttack(attackIndex, forceOptBoost = null) {
 
   // Choice-based attacks (e.g. optBoost) are selected from separate buttons
   // in the action panel; no blocking confirm() popup.
-  const opt = getOptBoostMeta(attack);
+  // Boost always proceeds — server will subtract min(energyCost, currentEnergy).
   let useOptBoost = forceOptBoost === true;
-  if (opt && useOptBoost && attacker.energy < opt.energyCost) useOptBoost = false;
 
   if (isOnline) {
     sendAction({ actionType: 'attack', attackIndex, useOptBoost });
@@ -541,18 +647,21 @@ function actionQuickRetreat() {
 }
 
 function selectBenchForRetreat(idx) {
+  if (G.animating) return;
   if (isOnline) { sendAction({ actionType: 'selectBenchForRetreat', benchIdx: idx }); return; }
   if (G.pendingRetreats.length === 0) return;
   const pr = G.pendingRetreats[0];
   dispatchAction({ type: 'selectBenchForRetreat', benchIdx: idx, _playerNum: pr.player });
 }
 
-function discardHeldItem(slot, benchIdx) {
-  if (isOnline) { sendAction({ actionType: 'discardItem', slot, benchIdx }); return; }
-  dispatchAction({ type: 'discardItem', slot, benchIdx });
+function discardHeldItem(slot, benchIdx, itemName) {
+  if (G.animating) return;
+  if (isOnline) { sendAction({ actionType: 'discardItem', slot, benchIdx, itemName: itemName || undefined }); return; }
+  dispatchAction({ type: 'discardItem', slot, benchIdx, itemName: itemName || undefined });
 }
 
 function selectTarget(playerNum, benchIdx) {
+  if (G.animating) return;
   if (!G.targeting) return;
   if (isOnline) { sendAction({ actionType: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx }); return; }
   dispatchAction({ type: 'selectTarget', targetPlayer: playerNum, targetBenchIdx: benchIdx });
@@ -592,7 +701,13 @@ function actionPlayPokemon(handIdx) {
   const itemsInHand = myP.hand.filter(c => c.type === 'items');
   if (itemsInHand.length > 0 && !card.heldItem && !G.pendingPlayPokemon) {
     G.pendingPlayPokemon = { handIdx };
-    renderItemAttachPrompt(handIdx, itemsInHand);
+    // Check if this Pokemon has the Keyring ability (Klefki) — allows up to 3 items
+    const pokeData = getPokemonData(card.name);
+    if (pokeData && pokeData.ability && pokeData.ability.key === 'keyring') {
+      renderKeyringItemPrompt(handIdx, itemsInHand);
+    } else {
+      renderItemAttachPrompt(handIdx, itemsInHand);
+    }
     return;
   }
   if (isOnline) {
@@ -616,7 +731,67 @@ function renderItemAttachPrompt(handIdx, items) {
   panel.innerHTML = html;
 }
 
+// Keyring multi-item select: toggle up to 3 items, then confirm
+var _keyringSelected = [];
+function renderKeyringItemPrompt(handIdx, items) {
+  _keyringSelected = [];
+  const panel = document.getElementById('apActions');
+  const myP = isOnline ? me() : cp();
+  _renderKeyringButtons(handIdx, items, myP, panel);
+}
+
+function _renderKeyringButtons(handIdx, items, myP, panel) {
+  const maxItems = 3;
+  let html = `<div class="ap-section-label" style="color:#a855f7">KEYRING: ATTACH UP TO 3 ITEMS (` + _keyringSelected.length + `/` + maxItems + `)</div>`;
+  items.forEach((item) => {
+    const realIdx = myP.hand.indexOf(item);
+    const isSelected = _keyringSelected.indexOf(realIdx) !== -1;
+    const atMax = _keyringSelected.length >= maxItems && !isSelected;
+    const cls = isSelected ? 'ap-btn ap-btn-ability' : 'ap-btn ap-btn-end';
+    const style = isSelected ? ' style="border:2px solid #a855f7;box-shadow:0 0 8px #a855f7"' : (atMax ? ' style="opacity:0.4"' : '');
+    html += '<button class="' + cls + '"' + style + ' onclick="toggleKeyringItem(' + handIdx + ', ' + realIdx + ')">' +
+      '<span class="atk-name">' + (isSelected ? '✓ ' : '') + item.name + '</span></button>';
+  });
+  html += '<button class="ap-btn ap-btn-end" style="margin-top:6px;border:2px solid #22c55e" onclick="confirmKeyringItems(' + handIdx + ')">' +
+    '<span class="atk-name">' + (_keyringSelected.length > 0 ? 'Confirm (' + _keyringSelected.length + ' item' + (_keyringSelected.length > 1 ? 's' : '') + ')' : 'No Items') + '</span></button>';
+  panel.innerHTML = html;
+}
+
+function toggleKeyringItem(handIdx, itemIdx) {
+  if (G.animating) return;
+  const pos = _keyringSelected.indexOf(itemIdx);
+  if (pos !== -1) {
+    _keyringSelected.splice(pos, 1);
+  } else if (_keyringSelected.length < 3) {
+    _keyringSelected.push(itemIdx);
+  }
+  const myP = isOnline ? me() : cp();
+  const items = myP.hand.filter(c => c.type === 'items');
+  const panel = document.getElementById('apActions');
+  _renderKeyringButtons(handIdx, items, myP, panel);
+}
+
+function confirmKeyringItems(handIdx) {
+  if (G.animating) return;
+  G.pendingPlayPokemon = null;
+  if (_keyringSelected.length === 0) {
+    // No items selected
+    finishPlayPokemon(handIdx, null);
+  } else {
+    // First selected item is the primary, rest are extras
+    const primary = _keyringSelected[0];
+    const extras = _keyringSelected.slice(1);
+    if (isOnline) {
+      sendAction({ actionType: 'playPokemon', handIdx, itemHandIdx: primary, extraItemIndices: extras.length > 0 ? extras : undefined });
+    } else {
+      dispatchAction({ type: 'playPokemon', handIdx, itemHandIdx: primary, extraItemIndices: extras.length > 0 ? extras : undefined });
+    }
+  }
+  _keyringSelected = [];
+}
+
 function finishPlayPokemon(handIdx, itemHandIdx) {
+  if (G.animating) return;
   G.pendingPlayPokemon = null;
   if (isOnline) {
     sendAction({ actionType: 'playPokemon', handIdx, itemHandIdx });
@@ -649,7 +824,7 @@ function abilityRequiresActivePosition(key) {
 }
 
 function canUseAbilityFromSelection(abilityKey, used, benchIdx) {
-  const notSpent = !used || abilityKey === 'healingTouch' || abilityKey === 'magicDrain';
+  const notSpent = !used || abilityKey === 'bubbleCleanse' || abilityKey === 'magicDrain';
   const positionOk = !abilityRequiresActivePosition(abilityKey) || benchIdx === -1;
   return notSpent && positionOk;
 }
@@ -673,7 +848,8 @@ function showDamagePopup(amount, mult, targetSelector) {
     el.style.top = '35%';
   }
   document.body.appendChild(el);
-  const removeDelay = amount >= 100 ? 2000 : amount >= 50 ? 1400 : 1000;
+  // Popup lifetime matches CSS animation duration
+  const removeDelay = amount >= 100 ? 1600 : amount >= 50 ? 1200 : 900;
   setTimeout(() => el.remove(), removeDelay);
 
   if (mult > 1) {
@@ -682,14 +858,14 @@ function showDamagePopup(amount, mult, targetSelector) {
     eff.textContent = 'Super Effective!';
     eff.style.left = el.style.left; eff.style.top = (parseInt(el.style.top) - 30) + 'px';
     document.body.appendChild(eff);
-    setTimeout(() => eff.remove(), 1500);
+    setTimeout(() => eff.remove(), 1300);
   } else if (mult < 1) {
     const eff = document.createElement('div');
     eff.className = 'eff-text nve';
     eff.textContent = 'Resisted...';
     eff.style.left = el.style.left; eff.style.top = (parseInt(el.style.top) - 30) + 'px';
     document.body.appendChild(eff);
-    setTimeout(() => eff.remove(), 1500);
+    setTimeout(() => eff.remove(), 1300);
   }
 }
 
@@ -712,6 +888,8 @@ let dbSelection = [];
 let dbTab = 'pokemon';
 
 function initDeckBuild(playerNum) {
+  AnimQueue.clear();
+  G.animating = false;
   if (playerNum === 1) {
     for (let p = 1; p <= 2; p++) {
       G.players[p].maxBench = Constants.MAX_BENCH;
@@ -818,8 +996,9 @@ function showPassScreen(playerNum, subtitle, callback) {
 
 // ---------- SETUP PHASE ----------
 let setupStep = 0; // 0=P1 active, 1=P2 active, 2=P1 bench, 3=P2 bench
-let setupSelected = []; // {name, heldItem}
+let setupSelected = []; // {name, heldItem, extraItems?:[]}
 let setupItemFor = null; // pokemon name being assigned item
+let setupKeyringItems = []; // temp multi-item selection for Klefki
 
 function startSetupPhase() {
   setupStep = 0;
@@ -835,6 +1014,7 @@ function showSetupScreen() {
   G.currentPlayer = playerNum;
 
   setupSelected = [];
+  setupKeyringItems = [];
   showScreen('setupScreen');
 
   const phaseText = isActivePhase ? `${p.name}: Choose Active Pokémon + Item` : `${p.name}: Choose Bench Pokémon + Items`;
@@ -861,17 +1041,42 @@ function renderSetup() {
 
   let html = '';
   if (setupItemFor) {
-    // Show items to pick
-    html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${setupItemFor} (or skip):</div>`;
-    html += `<div class="setup-card" onclick="assignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
-    html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
-    itemHand.forEach(c => {
-      const used = setupSelected.some(s => s.heldItem === c.name);
-      html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
-        <img src="${getImg(c.name)}" alt="${c.name}">
-        <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
-      </div>`;
-    });
+    // Check if this is a Klefki (Keyring) — multi-item select
+    const setupPokeData = getPokemonData(setupItemFor);
+    const isKeyring = setupPokeData && setupPokeData.ability && setupPokeData.ability.key === 'keyring';
+    const maxSetupItems = isKeyring ? 3 : 1;
+    const usedItems = new Set(setupSelected.map(s => s.heldItem).filter(Boolean));
+    setupSelected.forEach(s => { if (s.extraItems) s.extraItems.forEach(ei => usedItems.add(ei)); });
+    setupKeyringItems.forEach(ki => usedItems.add(ki));
+
+    if (isKeyring) {
+      html += `<div style="width:100%;font-size:12px;color:#a855f7;font-weight:700;margin-bottom:8px;">KEYRING: Choose up to 3 items for ${setupItemFor} (${setupKeyringItems.length}/3)</div>`;
+      html += `<div class="setup-card" onclick="confirmSetupKeyring()" style="width:100px;border:2px solid #22c55e;display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#22c55e;font-size:11px">${setupKeyringItems.length > 0 ? 'Confirm (' + setupKeyringItems.length + ')' : 'No Items'}</span></div>`;
+      html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
+      itemHand.forEach(c => {
+        const used = usedItems.has(c.name) && setupKeyringItems.indexOf(c.name) === -1;
+        const isSelected = setupKeyringItems.indexOf(c.name) !== -1;
+        const atMax = setupKeyringItems.length >= 3 && !isSelected;
+        const borderStyle = isSelected ? 'border:2px solid #a855f7;box-shadow:0 0 8px #a855f7' : (atMax || used ? 'opacity:0.4' : '');
+        html += `<div class="setup-card ${used?'placed':''}" onclick="${!used ? `toggleSetupKeyringItem('${c.name.replace(/'/g,"\\'")}')` : ''}" style="${borderStyle}">
+          <img src="${getImg(c.name)}" alt="${c.name}">
+          ${isSelected ? '<div style="position:absolute;top:2px;left:2px;background:#a855f7;color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold">✓</div>' : ''}
+          <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
+        </div>`;
+      });
+    } else {
+      // Standard single-item select
+      html += `<div style="width:100%;font-size:12px;color:#f59e0b;font-weight:700;margin-bottom:8px;">Choose item for ${setupItemFor} (or skip):</div>`;
+      html += `<div class="setup-card" onclick="assignSetupItem(null)" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">No Item</span></div>`;
+      html += `<div class="setup-card" onclick="cancelSetupItem()" style="width:100px;border:2px dashed rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;min-height:60px;"><span style="color:#666;font-size:11px">Cancel</span></div>`;
+      itemHand.forEach(c => {
+        const used = usedItems.has(c.name);
+        html += `<div class="setup-card ${used?'placed':''}" onclick="assignSetupItem('${c.name.replace(/'/g,"\\'")}')">
+          <img src="${getImg(c.name)}" alt="${c.name}">
+          <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
+        </div>`;
+      });
+    }
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
@@ -885,21 +1090,30 @@ function renderSetup() {
   }
   hand.innerHTML = html;
 
+  // Helper: build item label text for setup preview
+  function _setupItemLabel(sel) {
+    const items = [sel.heldItem].concat(sel.extraItems || []).filter(Boolean);
+    if (items.length === 0) return 'No item';
+    return items.join(', ');
+  }
+
   // Preview slots
   const preview = document.getElementById('setupPreview');
   let previewHtml = '';
 
   if (isActivePhase) {
     const sel = setupSelected[0];
+    const itemLabel = sel ? _setupItemLabel(sel) : '';
     previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? 'onclick="unselectSetup(0)" style="cursor:pointer"' : ''}>
-      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
+      ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${itemLabel}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : '<div class="setup-slot-label">ACTIVE SLOT</div>'}
     </div>`;
   } else {
     const maxBench = p.maxBench || Constants.MAX_BENCH;
     for (let i = 0; i < maxBench; i++) {
       const sel = setupSelected[i];
+      const itemLabel = sel ? _setupItemLabel(sel) : '';
       previewHtml += `<div class="setup-slot ${sel?'filled':''}" ${sel ? `onclick="unselectSetup(${i})" style="cursor:pointer"` : ''}>
-        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${sel.heldItem||'No item'}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
+        ${sel ? `<img src="${getImg(sel.name)}" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')" style="cursor:zoom-in"><div><div class="setup-slot-name">${sel.name}</div><div class="setup-slot-label">${itemLabel}</div><div class="setup-slot-label" style="color:#888">(click to remove)</div><button class="setup-view-btn" onclick="event.stopPropagation();zoomCard('${sel.name.replace(/'/g,"\\'")}')">🔍 View</button></div>` : `<div class="setup-slot-label">BENCH ${i+1}</div>`}
       </div>`;
     }
   }
@@ -924,6 +1138,7 @@ function selectSetupPokemon(name) {
 
   p.mana -= data.cost;
   setupItemFor = name;
+  setupKeyringItems = [];
   renderSetup();
 }
 
@@ -934,6 +1149,27 @@ function cancelSetupItem() {
   const data = getPokemonData(setupItemFor);
   if (data) p.mana += data.cost;
   setupItemFor = null;
+  setupKeyringItems = [];
+  renderSetup();
+}
+
+function toggleSetupKeyringItem(itemName) {
+  const pos = setupKeyringItems.indexOf(itemName);
+  if (pos !== -1) {
+    setupKeyringItems.splice(pos, 1);
+  } else if (setupKeyringItems.length < 3) {
+    setupKeyringItems.push(itemName);
+  }
+  renderSetup();
+}
+
+function confirmSetupKeyring() {
+  if (!setupItemFor) return;
+  const primary = setupKeyringItems.length > 0 ? setupKeyringItems[0] : null;
+  const extras = setupKeyringItems.slice(1);
+  setupSelected.push({ name: setupItemFor, heldItem: primary, extraItems: extras.length > 0 ? extras : undefined });
+  setupItemFor = null;
+  setupKeyringItems = [];
   renderSetup();
 }
 
@@ -950,11 +1186,36 @@ function unselectSetup(idx) {
 
 function assignSetupItem(itemName) {
   const usedItems = new Set(setupSelected.map(s => s.heldItem).filter(Boolean));
+  setupSelected.forEach(s => { if (s.extraItems) s.extraItems.forEach(ei => usedItems.add(ei)); });
   if (itemName && usedItems.has(itemName)) return;
 
   setupSelected.push({ name: setupItemFor, heldItem: itemName });
   setupItemFor = null;
   renderSetup();
+}
+
+// Apply extra Keyring items to a Pokemon during setup
+function _applySetupExtraItems(pk, sel) {
+  if (!sel.extraItems || sel.extraItems.length === 0) return;
+  // Build full heldItems array: primary + extras
+  const allItems = [sel.heldItem].concat(sel.extraItems).filter(Boolean);
+  if (allItems.length > 1) {
+    pk.heldItems = allItems;
+  }
+  // Apply stat-modifying extras (same logic as server-side applyExtraItem)
+  const data = getPokemonData(pk.name);
+  sel.extraItems.forEach(itemName => {
+    if (itemName === 'Health Charm') {
+      pk.baseMaxHp = (pk.baseMaxHp || pk.maxHp) + 50; pk.maxHp += 50; pk.hp += 50;
+    } else if (itemName === 'Power Herb') {
+      pk.energy = Math.min(5, pk.energy + 1);
+    } else if (itemName === 'Quick Claw') {
+      pk.quickClawActive = true;
+    } else if (itemName === 'Eviolite' && data && data.cost <= 3) {
+      const bonus = (4 - data.cost) * 10;
+      pk.baseMaxHp = (pk.baseMaxHp || pk.maxHp) + bonus; pk.maxHp += bonus; pk.hp += bonus;
+    }
+  });
 }
 
 function confirmSetup() {
@@ -971,17 +1232,21 @@ function confirmSetup() {
   if (isActivePhase) {
     const sel = setupSelected[0];
     p.active = makePokemon(sel.name, sel.heldItem);
+    _applySetupExtraItems(p.active, sel);
     _onPlayAbilityLocal(playerNum, p.active);
     // Remove from hand
     p.hand = p.hand.filter(c => c.name !== sel.name);
     if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
+    if (sel.extraItems) sel.extraItems.forEach(ei => { p.hand = p.hand.filter(c => c.name !== ei); });
   } else {
     setupSelected.forEach(sel => {
       const setupPk = makePokemon(sel.name, sel.heldItem);
+      _applySetupExtraItems(setupPk, sel);
       p.bench.push(setupPk);
       _onPlayAbilityLocal(playerNum, setupPk);
       p.hand = p.hand.filter(c => c.name !== sel.name);
       if (sel.heldItem) p.hand = p.hand.filter(c => c.name !== sel.heldItem);
+      if (sel.extraItems) sel.extraItems.forEach(ei => { p.hand = p.hand.filter(c => c.name !== ei); });
     });
   }
 
@@ -1000,13 +1265,22 @@ function confirmSetup() {
     G.players[1].mana = 0;
     G.players[2].mana = 0;
     showScreen('battleScreen');
-    // Use shared game logic for start of turn
+    // Snapshot before startTurn so animation replay can apply state
+    // progressively (same pattern as dispatchAction). Without this,
+    // startTurn mutates mana and the mana_gain animation adds it again.
+    const preSnap = snapshotGameState();
     G.events = [];
     GameLogic.startTurn(G);
     const startEvents = G.events.slice();
     G.events = [];
+    const postSnap = snapshotGameState();
+    restoreGameState(preSnap);
     AnimQueue.replayEvents(startEvents, animCtx);
-    AnimQueue.setOnDrain(() => { G.animating = false; renderBattle(); });
+    AnimQueue.setOnDrain(() => {
+      restoreGameState(postSnap);
+      G.animating = false;
+      renderBattle();
+    });
     renderBattle();
   }
 }
@@ -1044,10 +1318,7 @@ function renderBattle() {
   }
   document.getElementById('btTurn').textContent = turnText;
 
-  for (let p = 1; p <= 2; p++) {
-    const kosEl = document.getElementById(`btP${p}Kos`);
-    kosEl.innerHTML = Array(Constants.KOS_TO_WIN).fill(0).map((_, i) => `<div class="bt-ko ${i < G.players[p].kos ? 'filled' : ''}"></div>`).join('');
-  }
+  // Removed KO counter rendering - no longer using KO count win condition
 
   // Render fields - "you" is always me, "opp" is always them
   renderFieldSide('oppField', theirP, themNum());
@@ -1056,6 +1327,8 @@ function renderBattle() {
   // Update mana display
   const manaEl = document.getElementById('manaCurrent');
   if (manaEl) manaEl.textContent = myP.mana;
+  const pokeManaEl = document.getElementById('pokeManaCurrent');
+  if (pokeManaEl) pokeManaEl.textContent = myP.pokeMana;
 
   // Action panel
   renderActionPanel();
@@ -1134,18 +1407,22 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   const isMine = playerNum === meNum();
   const isMyTurnNow = isOnline ? isMyTurn() : true;
   let glowClass = '';
+  let hasUsableAbility = false;
   if (isMine && isMyTurnNow && !G.animating && G.pendingRetreats.length === 0 && !G.targeting) {
     const data = getPokemonData(pk.name);
-    const me = isOnline ? G.players[myPlayerNum] : cp();
+    const meP = isOnline ? G.players[myPlayerNum] : cp();
     // Yellow glow: active pokemon that has an affordable attack
     if (benchIdx === -1 && data.attacks && data.attacks.some(atk => pk.energy >= atk.energy && !pk.status.includes('sleep'))) {
       glowClass = 'glow-attack';
     }
     // Green glow: has usable active ability
     if (data.ability && data.ability.type === 'active') {
-      const used = me.usedAbilities[data.ability.key];
+      const used = meP.usedAbilities[data.ability.key];
       const canUse = canUseAbilityFromSelection(data.ability.key, used, benchIdx);
-      if (canUse) glowClass += (glowClass ? ' ' : '') + 'glow-ability';
+      if (canUse) {
+        glowClass += (glowClass ? ' ' : '') + 'glow-ability';
+        hasUsableAbility = true;
+      }
     }
   }
 
@@ -1156,10 +1433,14 @@ function renderPokemonSlot(pk, slotClass, playerNum, benchIdx, isRetreatTarget) 
   let statusHtml = '';
   if (pk.status.length > 0) statusHtml = pk.status.map(s => `<span class="fp-status ${s}">${s.toUpperCase()}</span>`).join(' ');
 
+  // Ability badge for bench pokemon with usable abilities (makes it extra clear)
+  const abilityBadgeHtml = (hasUsableAbility && benchIdx >= 0) ? '<div class="fp-ability-badge">ABILITY</div>' : '';
+
   return `<div class="field-pokemon ${slotClass} ${glowClass} ${selectedClass}">
     <div class="fp-img-wrap">
+      ${abilityBadgeHtml}
       <img class="fp-img ${imgClass}" src="${getImg(pk.name)}" alt="${pk.name}" ${clickAction}>
-      ${pk.heldItem ? `<img class="fp-held-item" src="${getImg(pk.heldItem)}" alt="${pk.heldItem}" title="${pk.heldItem}" onclick="event.stopPropagation();zoomCard('${pk.heldItem.replace(/'/g,"\\'")}')" style="cursor:pointer">` : ''}
+      ${(pk.heldItems && pk.heldItems.length > 0 ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : [])).map((hi, hiIdx) => `<img class="fp-held-item" src="${getImg(hi)}" alt="${hi}" title="${hi}" onclick="event.stopPropagation();zoomCard('${hi.replace(/'/g,"\\'")}')" style="cursor:pointer;${hiIdx > 0 ? 'right:' + (4 + hiIdx * 14) + 'px' : ''}">`).join('')}
     </div>
     <div class="fp-info">
       <div class="fp-name">${pk.name}</div>
@@ -1230,16 +1511,17 @@ function renderActionPanel() {
   const isActive = sel.benchIdx === -1;
 
   // Show card info (always)
-  const discardBtn = isMine && selPk.heldItem
-    ? `<button onclick="discardHeldItem('${isActive ? 'active' : 'bench'}',${isActive ? null : sel.benchIdx})" style="font-size:9px;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">Discard</button>`
-    : '';
+  const allItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
   const zoomBtn = `<button onclick="zoomCard('${selPk.name.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(129,140,248,0.3);color:#a5b4fc;border:1px solid rgba(129,140,248,0.3);border-radius:4px;padding:2px 8px;cursor:pointer;margin-left:6px">🔍 View</button>`;
-  const itemZoomBtn = selPk.heldItem ? `<button onclick="zoomCard('${selPk.heldItem.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(168,85,247,0.2);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">🔍</button>` : '';
+  const itemsHtml = allItems.length > 0 ? allItems.map(hi => {
+    const izBtn = `<button onclick="zoomCard('${hi.replace(/'/g,"\\'")}')" style="font-size:9px;background:rgba(168,85,247,0.2);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:4px">🔍</button>`;
+    return `<span style="margin-right:6px">🎒 ${hi} ${izBtn}</span>`;
+  }).join('') : '';
   info.innerHTML = `
     <div class="ap-pokemon-name">${selPk.name}${!isMine ? ' <span style="color:#ef4444;font-size:10px">(Enemy)</span>' : ''} ${zoomBtn}</div>
     <div class="ap-pokemon-types">${selData.types.map(t => `<span class="ap-type-badge" style="background:${TYPE_COLORS[t]}">${t}</span>`).join('')}</div>
     <div class="ap-pokemon-hp">HP: ${selPk.hp}/${selPk.maxHp} | Energy: ${selPk.energy}/5</div>
-    ${selPk.heldItem ? `<div style="font-size:10px;color:#a855f7">🎒 ${selPk.heldItem} ${itemZoomBtn} ${discardBtn}</div>` : ''}
+    ${itemsHtml ? `<div style="font-size:10px;color:#a855f7">${itemsHtml}</div>` : ''}
     ${selPk.status.length > 0 ? `<div style="font-size:10px;color:#f59e0b">Status: ${selPk.status.join(', ')}</div>` : ''}
     ${selData.ability ? `<div style="font-size:10px;color:#c4b5fd">✦ ${selData.ability.name}: ${selData.ability.desc} <span style="opacity:0.6">[${selData.ability.type}]</span></div>` : ''}
     <div style="font-size:10px;color:#888;margin-top:2px">${selData.attacks.map(a => `${a.name} (${a.energy}⚡${a.baseDmg ? ', ' + a.baseDmg + 'dmg' : ''})`).join(' · ')}</div>
@@ -1271,13 +1553,17 @@ function renderActionPanel() {
 
     // Attacks
     html += '<div class="ap-section-label">ATTACKS</div>';
+    // Check for Choice Scarf cost reduction
+    const pkItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    const hasScarfReduction = pkItems.indexOf('Choice Scarf') !== -1 ? 1 : 0;
     data.attacks.forEach((atk, i) => {
       let cost = atk.energy;
       if (pk.quickClawActive) cost = Math.max(0, cost - 2);
+      if (hasScarfReduction) cost = Math.max(0, cost - hasScarfReduction);
       cost += thickAromaCost;
       const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-      const costLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+      const costLabel = (thickAromaCost > 0 || hasScarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
         <span class="atk-name">${atk.name}${dmgLabel}</span>
         <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
@@ -1285,10 +1571,11 @@ function renderActionPanel() {
 
       const opt = getOptBoostMeta(atk);
       if (opt) {
-        const canUseBoost = canUse && pk.energy >= (cost + opt.energyCost);
-        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-          <span class="atk-name">${atk.name} ★ Boost${dmgLabel ? ` (+${opt.extraDmg})` : ''}</span>
-          <span class="atk-detail">${costLabel} + ${opt.energyCost}⚡ | ${atk.desc || ''}</span>
+        // Boost has same usability as base attack — it subtracts up to energyCost
+        // from current energy (capped at what you have), adding extra damage.
+        html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+          <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
+          <span class="atk-detail">${costLabel} (−${opt.energyCost}⚡) | ${atk.desc || ''}</span>
         </button>`;
       }
     });
@@ -1309,10 +1596,9 @@ function renderActionPanel() {
           </button>`;
           const opt = getOptBoostMeta(atk);
           if (opt) {
-            const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
-            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-              <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
-              <span class="atk-detail">${cCostLabel} + ${opt.energyCost}⚡ | from ${benchPk.name}</span>
+            html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+              <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
+              <span class="atk-detail">${cCostLabel} (−${opt.energyCost}⚡) | from ${benchPk.name}</span>
             </button>`;
           }
         });
@@ -1335,10 +1621,9 @@ function renderActionPanel() {
         </button>`;
         const opt = getOptBoostMeta(atk);
         if (opt) {
-          const canUseBoost = canUse && pk.energy >= ((atk.energy + thickAromaCost) + opt.energyCost);
-          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUseBoost?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
-            <span class="atk-name">${atk.name} ★ Boost (+${opt.extraDmg})</span>
-            <span class="atk-detail">${dCostLabel} + ${opt.energyCost}⚡ | from ${op().active.name}</span>
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+            <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
+            <span class="atk-detail">${dCostLabel} (−${opt.energyCost}⚡) | from ${op().active.name}</span>
           </button>`;
         }
       });
@@ -1376,7 +1661,8 @@ function renderActionPanel() {
 
     // Retreat
     html += '<div class="ap-section-label">MOVEMENT</div>';
-    const qrCost = pk.heldItem === 'Float Stone' ? 1 : 2;
+    const pkAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    const qrCost = pkAllItems.indexOf('Float Stone') !== -1 ? 1 : 2;
     html += `<button class="ap-btn ap-btn-retreat" onclick="actionQuickRetreat()" ${me.bench.length > 0 && pk.energy >= qrCost ? '' : 'disabled'}>
       <span class="atk-name">Quick Retreat</span><span class="atk-detail">${qrCost} energy, don't end turn</span>
     </button>`;
@@ -1385,11 +1671,14 @@ function renderActionPanel() {
     </button>`;
 
     // Held item discard
-    if (pk.heldItem) {
-      html += '<div class="ap-section-label">ITEM</div>';
-      html += `<button class="ap-btn" onclick="discardHeldItem('active',null)" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${pk.heldItem}</span><span class="atk-detail">Click to discard</span>
-      </button>`;
+    const activeAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    if (activeAllItems.length > 0) {
+      html += '<div class="ap-section-label">ITEM' + (activeAllItems.length > 1 ? 'S' : '') + '</div>';
+      activeAllItems.forEach(hi => {
+        html += `<button class="ap-btn" onclick="discardHeldItem('active',null,'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
+        </button>`;
+      });
     }
   }
   // === MY BENCH POKEMON SELECTED ===
@@ -1409,9 +1698,9 @@ function renderActionPanel() {
     </button>`;
 
     // Ability (if this bench pokemon has an active ability)
-    if (data.ability && data.ability.type === 'active' && data.ability.key !== 'improvise') {
+    if (data.ability && data.ability.type === 'active') {
       const used = me.usedAbilities[data.ability.key];
-      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel);
+      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel.benchIdx);
       html += '<div class="ap-section-label">ABILITY</div>';
       html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
         <span class="atk-name">${data.ability.name}</span>
@@ -1426,11 +1715,14 @@ function renderActionPanel() {
     }
 
     // Held item discard
-    if (selPk.heldItem) {
-      html += '<div class="ap-section-label">ITEM</div>';
-      html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx})" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-        <span class="atk-name">${selPk.heldItem}</span><span class="atk-detail">Click to discard</span>
-      </button>`;
+    const benchAllItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
+    if (benchAllItems.length > 0) {
+      html += '<div class="ap-section-label">ITEM' + (benchAllItems.length > 1 ? 'S' : '') + '</div>';
+      benchAllItems.forEach(hi => {
+        html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx},'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
+          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
+        </button>`;
+      });
     }
 
     // Show attacks (info-only, can't use from bench)
@@ -1475,7 +1767,7 @@ function renderHandPanel() {
   pokemonHand.forEach((c, i) => {
     const realIdx = me.hand.indexOf(c);
     const data = getPokemonData(c.name);
-    const canAfford = me.mana >= data.cost && me.bench.length < (me.maxBench || Constants.MAX_BENCH);
+    const canAfford = me.mana >= data.cost && me.pokeMana >= data.cost && me.bench.length < (me.maxBench || Constants.MAX_BENCH);
     html += `<div class="ap-hand-card ${canAfford?'':'cant-afford'}" onclick="actionPlayPokemon(${realIdx})">
       <img src="${getImg(c.name)}">
       <div><div class="hc-name">${c.name}</div><div class="hc-cost">${data.cost}⬡ · ${data.hp}HP</div></div>
@@ -1737,11 +2029,15 @@ function handleGameState(state, events) {
 
   // Handle phase transitions
   if (state.phase === 'deckBuild') {
+    AnimQueue.clear();
+    G.animating = false;
     applyServerState(state);
     showScreen('deckBuildScreen');
     document.getElementById('dbPlayerTag').textContent = G.players[myPlayerNum].name;
     renderDeckBuild();
   } else if (state.phase === 'setupActive' || state.phase === 'setupBench') {
+    AnimQueue.clear();
+    G.animating = false;
     applyServerState(state);
     showOnlineSetupScreen(state.phase);
   } else if (state.phase === 'battle') {
@@ -1749,10 +2045,12 @@ function handleGameState(state, events) {
     if (events.length > 0) {
       // Defer full state update until after event replay so animations
       // (like ko-fall) can render against the pre-event DOM state.
-      // Only update log so new log entries appear during replay.
       G.log = state.log || [];
-      replayEvents(events).then(() => {
+      G.animating = true;
+      AnimQueue.replayEvents(events, animCtx);
+      AnimQueue.setOnDrain(() => {
         applyServerState(state);
+        G.animating = false;
         renderBattle();
         if (G.winner) showWin(G.winner);
       });
@@ -1770,341 +2068,8 @@ function handleGameState(state, events) {
 // EVENT REPLAY
 // ============================================================
 async function replayEvents(events) {
-  isReplayingEvents = true;
-  renderBattle(); // Render initial state
-
-  for (const event of events) {
-    // Helper: find a pokemon's selector from event fields.
-    // Events now use shared game-logic format: targetOwner/benchIdx/pokemon (name string).
-    const evtSel = (pNum, bIdx) => pNum != null ? getPokemonSelector(pNum, bIdx != null ? bIdx : -1) : null;
-    const findSel = (name) => name ? findPokemonSelector(name) : null;
-
-    switch (event.type) {
-      case 'attack_declare': {
-        const atkSel = getPokemonSelector(event.player || G.currentPlayer, -1);
-        animateEl(atkSel, 'attacking', 400);
-        await delay(400);
-        break;
-      }
-      case 'damage': {
-        captureHpState(); _hpPreCaptured = true; // Snapshot HP BEFORE applying damage so animateHpBars sees the delta
-        const dmgSel = evtSel(event.targetOwner, event.benchIdx);
-        showDamagePopup(event.amount, event.mult, dmgSel);
-        animateEl(dmgSel, getShakeClass(event.amount), getShakeDuration(event.amount));
-        const attackColor = (TYPE_PARTICLE_COLORS && event.attackerType) ? (TYPE_PARTICLE_COLORS[event.attackerType] || '#ef4444') : '#ef4444';
-        spawnParticlesAtEl(dmgSel, attackColor, event.amount >= 100 ? 22 : 14, {spread: event.amount >= 100 ? 75 : 55});
-        // Apply damage to local state so HP bars update during replay
-        if (event.targetOwner) {
-          const dmgOwner = G.players[event.targetOwner];
-          const bIdx = event.benchIdx != null ? event.benchIdx : -1;
-          const dmgTarget = bIdx === -1 ? dmgOwner.active : dmgOwner.bench[bIdx];
-          if (dmgTarget) {
-            dmgTarget.damage = (dmgTarget.damage || 0) + event.amount;
-            dmgTarget.hp = Math.max(0, dmgTarget.maxHp - dmgTarget.damage);
-          }
-        }
-        renderBattle();
-        await delay(event.amount >= 100 ? 1200 : event.amount >= 50 ? 900 : 700);
-        break;
-      }
-      case 'selfDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const selfSel = findSel(event.pokemon);
-        if (selfSel) {
-          showDamagePopupAt(event.amount, selfSel, false);
-          animateEl(selfSel, 'hit-shake', 500);
-        }
-        // Apply self-damage to local state
-        if (event.pokemon) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.pokemon) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'ko': {
-        const koSel = evtSel(event.owner, -1);
-        animateEl(koSel, 'ko-fall', 600);
-        spawnParticlesAtEl(koSel, '#ef4444', 20, {spread:70, size:4});
-        await delay(600);
-        // Remove the KO'd pokemon from local state so re-render shows it gone
-        if (event.owner) {
-          const koOwner = G.players[event.owner];
-          // Find by name since we don't have targetIdx anymore
-          if (koOwner.active && koOwner.active.name === event.pokemon) {
-            koOwner.active = null;
-          } else {
-            const koBIdx = koOwner.bench.findIndex(p => p.name === event.pokemon);
-            if (koBIdx >= 0) koOwner.bench.splice(koBIdx, 1);
-          }
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'statusApplied': {
-        const statSel = findSel(event.pokemon);
-        const statusColors = { poison: '#A33EA1', burn: '#EE8130', sleep: '#6b7280', confusion: '#eab308' };
-        if (statSel) {
-          animateEl(statSel, 'status-apply', 500);
-          spawnParticlesAtEl(statSel, statusColors[event.status] || '#fff', 10, {spread:40});
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'status_cure': {
-        const cureSel = findSel(event.pokemon);
-        if (cureSel) animateEl(cureSel, 'status-cure', 500);
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'statusDamage':
-      case 'status_tick': {
-        captureHpState(); _hpPreCaptured = true;
-        const tickOwnerNum = event.owner || event.targetOwner;
-        const tickSel = evtSel(tickOwnerNum, -1);
-        const tickColors = { poison: '#A33EA1', burn: '#EE8130' };
-        spawnParticlesAtEl(tickSel, tickColors[event.status] || '#fff', 10, {spread:40, size:5});
-        animateEl(tickSel, 'status-apply', 500);
-        const tickDmg = event.damage || event.amount;
-        if (tickDmg && tickOwnerNum) {
-          const tickOwner = G.players[tickOwnerNum];
-          const tickTarget = tickOwner.active; // status damage always on active
-          if (tickTarget) {
-            tickTarget.damage = (tickTarget.damage || 0) + tickDmg;
-            tickTarget.hp = Math.max(0, tickTarget.maxHp - tickTarget.damage);
-          }
-        }
-        renderBattle();
-        await delay(600);
-        break;
-      }
-      case 'heal':
-      case 'ability_heal':
-      case 'item_heal': {
-        captureHpState(); _hpPreCaptured = true;
-        const healName = event.target || event.pokemon;
-        const healSel = findSel(healName);
-        if (healSel) {
-          animateEl(healSel, 'heal-pulse', 500);
-          spawnParticlesAtEl(healSel, '#4ade80', 8, {spread:30});
-          showDamagePopupAt(event.amount, healSel, true);
-        }
-        // Apply heal to local state
-        if (healName) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            const allPk = [p.active, ...p.bench].filter(Boolean);
-            const target = allPk.find(pk => pk.name === healName);
-            if (target) {
-              target.damage = Math.max(0, (target.damage || 0) - (event.amount || 0));
-              target.hp = Math.min(target.maxHp, target.maxHp - target.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'energy_gain':
-      case 'energyGain': {
-        const enSel = findSel(event.pokemon);
-        if (enSel) {
-          animateEl(enSel, 'energy-gain', 400);
-          spawnParticlesAtEl(enSel, '#F7D02C', 6, {spread:30, size:4});
-          showEnergyPopup(enSel, '+' + (event.amount || 1) + ' ⚡');
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'mana_gain':
-      case 'manaGain': {
-        if (event.player) showManaPopupForPlayer(event.player, event.amount);
-        else showManaPopup(event.amount);
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'switch_active':
-      case 'retreat': {
-        const actSel = event.player ? getPokemonSelector(event.player, -1) : '#youField .active-slot';
-        animateEl(actSel, 'slide-out', 320);
-        await delay(320);
-        if (event.player) {
-          const swOwner = G.players[event.player];
-          const fromBenchIdx = event.benchIdx != null ? event.benchIdx : null;
-          if (swOwner && fromBenchIdx != null && swOwner.bench[fromBenchIdx]) {
-            const incoming = swOwner.bench.splice(fromBenchIdx, 1)[0];
-            if (swOwner.active && swOwner.active.hp > 0) swOwner.bench.push(swOwner.active);
-            swOwner.active = incoming;
-          }
-        }
-        renderBattle();
-        animateEl(actSel, 'slide-in', 320);
-        await delay(320);
-        break;
-      }
-      case 'retreat_pending': {
-        renderBattle();
-        break;
-      }
-      case 'play_pokemon': {
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'item_proc':
-      case 'itemProc': {
-        const ipSel = findSel(event.pokemon);
-        if (ipSel) {
-          animateEl(ipSel, 'item-proc', 600);
-          if (event.effect === 'energyGain' && event.amount) showEnergyPopup(ipSel, '+' + event.amount + ' ⚡');
-          if (event.effect === 'heal' && event.amount) showDamagePopupAt(event.amount, ipSel, true);
-          if (event.effect === 'focusSash') showDamagePopupAt(0, ipSel, true);
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'reactiveDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const rdSel = findSel(event.target);
-        if (rdSel) {
-          showDamagePopupAt(event.amount, rdSel, false);
-          animateEl(rdSel, 'hit-shake', 500);
-        }
-        // Apply reactive damage to local state
-        if (event.target) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.target) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'recoilDamage': {
-        captureHpState(); _hpPreCaptured = true;
-        const rcSel = findSel(event.pokemon);
-        if (rcSel) showDamagePopupAt(event.amount, rcSel, false);
-        // Apply recoil damage to local state
-        if (event.pokemon) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            if (p.active && p.active.name === event.pokemon) {
-              p.active.damage = (p.active.damage || 0) + event.amount;
-              p.active.hp = Math.max(0, p.active.maxHp - p.active.damage);
-              break;
-            }
-          }
-        }
-        renderBattle();
-        await delay(300);
-        break;
-      }
-      case 'switch_turn': {
-        showTurnOverlay(event.playerName || ('Player ' + event.player + "'s Turn"));
-        await delay(1000);
-        renderBattle();
-        break;
-      }
-      case 'extra_turn_start': {
-        showTurnOverlay((event.playerName || ('Player ' + event.player)) + ' gets an extra turn!');
-        await delay(1000);
-        renderBattle();
-        break;
-      }
-      case 'confusion_fail': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'filtered':
-      case 'noDamage': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'forceSwitch': {
-        renderBattle();
-        await delay(500);
-        break;
-      }
-      case 'ability_effect':
-      case 'ability_targeting': {
-        renderBattle();
-        await delay(400);
-        break;
-      }
-      case 'ability_damage': {
-        captureHpState(); _hpPreCaptured = true;
-        const abSel = findSel(event.target);
-        if (abSel) {
-          showDamagePopupAt(event.amount, abSel, false);
-          animateEl(abSel, 'hit-shake', 450);
-        }
-        if (event.target && event.amount) {
-          for (let pNum = 1; pNum <= 2; pNum++) {
-            const p = G.players[pNum];
-            const allPk = [p.active, ...p.bench].filter(Boolean);
-            const target = allPk.find(pk => pk.name === event.target);
-            if (!target) continue;
-            target.damage = (target.damage || 0) + event.amount;
-            target.hp = Math.max(0, target.maxHp - target.damage);
-            break;
-          }
-        }
-        renderBattle();
-        await delay(450);
-        break;
-      }
-      case 'discard_item': {
-        renderBattle();
-        break;
-      }
-      case 'needNewActive': {
-        renderBattle();
-        break;
-      }
-      case 'win': {
-        // Handled after replay
-        renderBattle();
-        break;
-      }
-      case 'log': {
-        // Already in G.log, just re-render
-        break;
-      }
-      case 'phase_change': {
-        // Handled in handleGameState
-        renderBattle();
-        break;
-      }
-      default: {
-        // Unknown event type — just render
-        renderBattle();
-        break;
-      }
-    }
-  }
-
-  isReplayingEvents = false;
+  // Online event replay is now handled by AnimQueue.replayEvents (shared with offline path).
+  // This stub is kept for any legacy callers.
 }
 
 // ============================================================
@@ -2253,9 +2218,9 @@ function renderOnlineSetup() {
       </div>`;
     }
   }
-  const canConfirmBench = !isActive && onlineSetupSelected.length === 0 && !onlineSetupItemFor && pokemonHand.every(c => remainingMana < getPokemonData(c.name).cost);
-  const canConfirm = (onlineSetupSelected.length > 0 && !onlineSetupItemFor) || canConfirmBench;
-  previewHtml += `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="onlineConfirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActive ? 'Confirm Active' : (canConfirmBench ? 'Skip Bench (no mana)' : 'Confirm Bench')}</button>`;
+  const canSkipBench = !isActive && !onlineSetupItemFor;
+  const canConfirm = (onlineSetupSelected.length > 0 && !onlineSetupItemFor) || canSkipBench;
+  previewHtml += `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="onlineConfirmSetup()" ${canConfirm ? '' : 'disabled'}>${isActive ? 'Confirm Active' : (onlineSetupSelected.length === 0 ? 'Skip Bench' : 'Confirm Bench')}</button>`;
   preview.innerHTML = previewHtml;
 
   document.getElementById('setupMana').textContent = `Mana: ${remainingMana}`;

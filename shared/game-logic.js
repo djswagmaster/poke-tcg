@@ -46,6 +46,42 @@ function isPassiveBlocked(G) {
   return DamagePipeline.isPassiveBlocked(G);
 }
 
+// Check if a player's OPPONENT has a specific passive ability in play
+function _oppHasPassive(G, playerNum, abilityKey) {
+  var opponent = G.players[opp(playerNum)];
+  var allPokemon = [opponent.active].concat(opponent.bench).filter(Boolean);
+  for (var i = 0; i < allPokemon.length; i++) {
+    if (allPokemon[i].hp <= 0) continue;
+    var d = PokemonDB.getPokemonData(allPokemon[i].name);
+    if (d && d.ability && d.ability.key === abilityKey && d.ability.type === 'passive') return true;
+  }
+  return false;
+}
+
+// Healing Scarf: heal 20 whenever a Pokemon gains energy
+function triggerHealingScarf(G, pk, healAmount) {
+  if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
+    var amt = healAmount || 20;
+    pk.damage = Math.max(0, pk.damage - amt);
+    pk.hp = pk.maxHp - pk.damage;
+    addLog(G, 'Healing Scarf heals ' + pk.name + ' ' + amt, 'heal');
+    G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: pk.name, amount: amt, owner: G.currentPlayer });
+  }
+}
+
+// Blockade: opponent's ability prevents retreat (unless holder has Protect Goggles)
+function isBlockedByBlockade(G, retreater) {
+  var oppActive = G.players[opp(G.currentPlayer)].active;
+  if (oppActive && !isPassiveBlocked(G)) {
+    var oppData = PokemonDB.getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'blockade' && retreater.heldItem !== 'Protect Goggles') {
+      addLog(G, 'Blockade prevents retreat!', 'effect');
+      return true;
+    }
+  }
+  return false;
+}
+
 // ============================================================
 // POKEMON FACTORY
 // ============================================================
@@ -72,6 +108,23 @@ function makePokemon(name, heldItem) {
   };
 }
 
+// Apply a bonus held item to a Pokemon (used by Klefki's Keyring ability).
+// The primary item is already applied via makePokemon; this handles extras.
+function applyExtraItem(pk, itemName, data) {
+  if (itemName === 'Health Charm') {
+    pk.baseMaxHp += 50; pk.maxHp += 50; pk.hp += 50;
+  } else if (itemName === 'Power Herb') {
+    pk.energy = Math.min(Constants.MAX_ENERGY, pk.energy + 1);
+  } else if (itemName === 'Quick Claw') {
+    pk.quickClawActive = true;
+  } else if (itemName === 'Eviolite' && data && data.cost <= 3) {
+    var bonus = (4 - data.cost) * 10;
+    pk.baseMaxHp += bonus; pk.maxHp += bonus; pk.hp += bonus;
+  }
+  // Other items (reactive/proc-based) are tracked in pk.heldItems
+  // and checked at hook sites via getHeldItems()
+}
+
 // ============================================================
 // GAME STATE FACTORY
 // ============================================================
@@ -82,8 +135,8 @@ function createGame() {
     currentPlayer: 1,
     turn: 0,
     players: {
-      1: { name: 'Player 1', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
-      2: { name: 'Player 2', mana: 0, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
+      1: { name: 'Player 1', mana: 0, pokeMana: 25, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
+      2: { name: 'Player 2', mana: 0, pokeMana: 25, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
     },
     log: [],
     events: [],
@@ -103,6 +156,11 @@ function runOnPlayAbility(G, playerNum, pk) {
     p.maxBench = (p.maxBench || Constants.MAX_BENCH) + 1;
     addLog(G, pk.name + ' expands your bench capacity by 1!', 'effect');
     G.events.push({ type: 'ability_effect', ability: 'dimensionExpansion', pokemon: pk.name, player: playerNum, maxBench: p.maxBench });
+  }
+  // Keyring (Klefki): item attachment is handled by doPlayPokemon via extraItemIndices
+  if (data.ability.key === 'keyring' && pk.heldItems && pk.heldItems.length > 1) {
+    addLog(G, 'Keyring: ' + pk.name + ' attached ' + pk.heldItems.length + ' items!', 'effect');
+    G.events.push({ type: 'ability_effect', ability: 'keyring', pokemon: pk.name, player: playerNum, items: pk.heldItems });
   }
 }
 
@@ -174,7 +232,7 @@ function startTurn(G) {
       pk.damage = Math.max(0, pk.damage - 20);
       pk.hp = pk.maxHp - pk.damage;
       addLog(G, 'Berry Juice heals ' + pk.name + ' 20', 'heal');
-      G.events.push({ type: 'ability_heal', pokemon: pk.name, amount: 20, ability: 'berryJuice' });
+      G.events.push({ type: 'ability_heal', pokemon: pk.name, amount: 20, ability: 'berryJuice', owner: G.currentPlayer });
     }
   });
 
@@ -187,7 +245,7 @@ function startTurn(G) {
       pk.heldItemUsed = true;
       pk.heldItem = null;
       addLog(G, 'Lum Berry cures ' + pk.name + '! (Discarded)', 'heal');
-      G.events.push({ type: 'item_proc', item: 'Lum Berry', pokemon: pk.name, effect: 'cureStatus', heal: 30 });
+      G.events.push({ type: 'item_proc', item: 'Lum Berry', pokemon: pk.name, effect: 'cureStatus', heal: 30, owner: G.currentPlayer });
     }
   });
 
@@ -199,7 +257,7 @@ function endTurn(G) {
   var p = cp(G);
   var events = [];
 
-  // Suicune Aqua Ring (strip from opp at end of owner's turn)
+  // Suicune Freezing Winds (strip from opp at end of owner's turn)
   var allMine = [p.active].concat(p.bench).filter(Boolean);
   allMine.forEach(function(pk) {
     var d = PokemonDB.getPokemonData(pk.name);
@@ -207,7 +265,7 @@ function endTurn(G) {
       var target = op(G).active;
       if (target && target.energy > 0 && target.heldItem !== 'Protect Goggles') {
         target.energy = Math.max(0, target.energy - 1);
-        addLog(G, 'Aqua Ring strips 1 energy from ' + target.name, 'effect');
+        addLog(G, 'Freezing Winds strips 1 energy from ' + target.name, 'effect');
         G.events.push({ type: 'ability_effect', ability: 'aquaRing', target: target.name, effect: 'stripEnergy' });
       }
     }
@@ -236,7 +294,8 @@ function endTurn(G) {
       addLog(G, 'Poison deals 10 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', status: 'poison', pokemon: pk.name, damage: 10, owner: side.pNum });
       if (poisonResult.ko) {
-        G.events = G.events.concat(poisonResult.events);
+        // Filter out the statusDamage event — status_tick already shows the damage popup
+        G.events = G.events.concat(poisonResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
       }
     }
 
@@ -246,14 +305,30 @@ function endTurn(G) {
       addLog(G, 'Burn deals 20 to ' + pk.name, 'damage');
       G.events.push({ type: 'status_tick', status: 'burn', pokemon: pk.name, damage: 20, owner: side.pNum });
       if (burnResult.ko) {
-        G.events = G.events.concat(burnResult.events);
+        // Filter out the statusDamage event — status_tick already shows the damage popup
+        G.events = G.events.concat(burnResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
       }
-      if (pk.hp > 0 && pk.status.indexOf('burn') !== -1 && Math.random() < 0.5) {
+      // Magma Sear: opponent's Magmar forces burn recovery to always fail
+      var magmaSearActive = !isPassiveBlocked(G) && _oppHasPassive(G, side.pNum, 'magmaSear');
+      var burnCoinHeads = magmaSearActive ? false : (Math.random() < 0.5);
+      if (pk.hp > 0 && pk.status.indexOf('burn') !== -1 && burnCoinHeads) {
         pk.status = pk.status.filter(function(s) { return s !== 'burn'; });
         addLog(G, pk.name + "'s burn healed! (Heads)", 'heal');
-        G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'burn', reason: 'coinFlip' });
+        G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'burn', reason: 'coinFlip', owner: side.pNum });
       } else if (pk.hp > 0 && pk.status.indexOf('burn') !== -1) {
-        addLog(G, pk.name + ' is still Burned (Tails)', 'info');
+        if (magmaSearActive) {
+          addLog(G, 'Magma Sear forces tails! ' + pk.name + ' is still Burned', 'effect');
+          // Deal 10 extra damage from Magma Sear
+          var searResult = DamagePipeline.dealStatusDamage(G, pk, 10, side.pNum, 'magmaSear');
+          addLog(G, 'Magma Sear deals 10 to ' + pk.name, 'damage');
+          G.events.push({ type: 'ability_effect', ability: 'magmaSear', target: pk.name, damage: 10 });
+          if (searResult.ko) {
+            // Filter out the statusDamage event — ability_effect already handles the visual
+            G.events = G.events.concat(searResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
+          }
+        } else {
+          addLog(G, pk.name + ' is still Burned (Tails)', 'info');
+        }
       }
     }
 
@@ -262,7 +337,7 @@ function endTurn(G) {
       if (Math.random() < 0.5) {
         pk.status = pk.status.filter(function(s) { return s !== 'sleep'; });
         addLog(G, pk.name + ' woke up! (Heads)', 'info');
-        G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'sleep', reason: 'coinFlip' });
+        G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'sleep', reason: 'coinFlip', owner: side.pNum });
       } else {
         addLog(G, pk.name + ' is still Asleep! (Tails)', 'info');
       }
@@ -328,16 +403,10 @@ function doGrantEnergy(G, targetSlot, benchIdx) {
 
   p.mana -= cost;
   target.energy++;
-  G.events.push({ type: 'energy_gain', pokemon: target.name, amount: 1, cost: cost, slot: targetSlot, benchIdx: benchIdx });
+  G.events.push({ type: 'energy_gain', pokemon: target.name, amount: 1, cost: cost, slot: targetSlot, benchIdx: benchIdx, owner: G.currentPlayer });
   addLog(G, 'Granted ' + target.name + ' +1 energy (' + cost + ' mana)', '');
 
-  // Healing Scarf
-  if (target.heldItem === 'Healing Scarf' && target.damage > 0) {
-    target.damage = Math.max(0, target.damage - 20);
-    target.hp = target.maxHp - target.damage;
-    addLog(G, 'Healing Scarf heals ' + target.name + ' 20', 'heal');
-    G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: target.name, amount: 20 });
-  }
+  triggerHealingScarf(G, target);
 
   // Biting Whirlpool (opponent's Arctozolt)
   var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
@@ -346,7 +415,7 @@ function doGrantEnergy(G, targetSlot, benchIdx) {
     if (d.ability && d.ability.key === 'bitingWhirlpool' && !isPassiveBlocked(G)) {
       var dmgResult = DamagePipeline.applyDamage(G, target, 10, G.currentPlayer);
       addLog(G, 'Biting Whirlpool deals 10 to ' + target.name, 'effect');
-      G.events.push({ type: 'ability_damage', ability: 'bitingWhirlpool', target: target.name, amount: 10 });
+      G.events.push({ type: 'ability_damage', ability: 'bitingWhirlpool', target: target.name, amount: 10, owner: G.currentPlayer });
       if (dmgResult.ko) {
         var koEvents = DamagePipeline.handleKO(G, target, G.currentPlayer);
         G.events = G.events.concat(koEvents);
@@ -382,10 +451,8 @@ function doAttack(G, attackIndex, actionOpts) {
   // Energy cost + item cost mods + Thick Aroma
   var energyCost = attack.energy;
   if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
-  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
-    var atkCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
-    if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
-  }
+  var atkCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
+  if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
@@ -443,10 +510,9 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
 
   // Energy cost with item mods + Thick Aroma
   var energyCost = attack.energy;
-  if (attacker.heldItem && attacker.heldItem !== 'Quick Claw') {
-    var copiedCostHook = ItemDB.runItemHook('onAttackCost', attacker.heldItem, { holder: attacker, attack: attack, G: G });
-    if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
-  }
+  if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
+  var copiedCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
+  if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
   var oppActive = op(G).active;
   if (oppActive && !isPassiveBlocked(G)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
@@ -457,6 +523,15 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   if (attacker.cantUseAttack === attack.name && (!attacker.cantUseAttackUntilTurn || attacker.cantUseAttackUntilTurn >= G.turn)) {
     addLog(G, "Can't use " + attack.name + ' this turn!', 'info');
     return false;
+  }
+
+  // Consume Quick Claw
+  if (attacker.quickClawActive) {
+    attacker.quickClawActive = false;
+    attacker.heldItemUsed = true;
+    attacker.heldItem = null;
+    addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
+    G.events.push({ type: 'item_proc', item: 'Quick Claw', pokemon: attacker.name, effect: 'costReduction' });
   }
 
   var fx = attack.fx || '';
@@ -481,9 +556,26 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   var preEvents = FXHandlers.processPreDamageEffects(G, fx, attacker, G.currentPlayer);
   G.events = G.events.concat(preEvents);
 
+  // Handle optBoost: add boost damage to base attack and deduct energy BEFORE dealing damage
+  // so it's a single combined hit, not two separate ones.
+  var effectiveAttack = attack;
+  if (useOptBoost && fx.indexOf('optBoost:') !== -1) {
+    var optParts = fx.split('optBoost:')[1].split(':');
+    var optExtraDmg = parseInt(optParts[0]) || 0;
+    var optEnergyCost = parseInt(optParts[1]) || 0;
+    var actualOptCost = Math.min(optEnergyCost, attacker.energy);
+    attacker.energy -= actualOptCost;
+    if (actualOptCost > 0) {
+      G.events.push({ type: 'selfEnergyLoss', pokemon: attacker.name, amount: actualOptCost, owner: G.currentPlayer });
+      addLog(G, attacker.name + ' spends ' + actualOptCost + ' energy for boost!', 'effect');
+    }
+    // Create a modified attack with combined damage
+    effectiveAttack = { name: attack.name, energy: attack.energy, baseDmg: attack.baseDmg + optExtraDmg, fx: attack.fx, desc: attack.desc };
+  }
+
   // Snipe targeting (hit any Pokemon)
   if (fx.indexOf('snipe') !== -1 && fx.indexOf('sniperBench') === -1 && fx.indexOf('swarmSnipe') === -1) {
-    var snipeResult = FXHandlers.processAll(G, 'snipe', attacker, defender, attack, useOptBoost);
+    var snipeResult = FXHandlers.processAll(G, 'snipe', attacker, defender, effectiveAttack, useOptBoost);
     if (snipeResult.signal === 'pendingTarget') {
       G.targeting = { type: snipeResult.targetingInfo.type, validTargets: snipeResult.targetingInfo.validTargets, attackInfo: snipeResult.targetingInfo };
       G.targeting.attackInfo.attackSeq = attackSeq;
@@ -495,9 +587,9 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   if (!defender) return;
 
   // Main damage
-  var needsDmg = attack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
+  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
   if (needsDmg) {
-    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, attack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
+    var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, effectiveAttack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
     G.events = G.events.concat(damageResult.events);
 
     if (damageResult.result.mult > 1) addLog(G, 'Super Effective!', 'effect');
@@ -507,8 +599,9 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
     }
   }
 
-  // Process remaining FX (post-damage effects)
-  var fxResult = FXHandlers.processAll(G, fx, attacker, defender, attack, useOptBoost);
+  // Process remaining FX (post-damage effects) — optBoost is already handled above,
+  // so the FX handler will see useOptBoost=false to avoid double-processing.
+  var fxResult = FXHandlers.processAll(G, fx, attacker, defender, effectiveAttack, false);
   G.events = G.events.concat(fxResult.events);
 
   if (fxResult.signal === 'pendingTarget') {
@@ -526,6 +619,22 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
 
 function finalizeAttack(G, attacker) {
   if (attacker) attacker.attackedThisTurn = true;
+
+  // Swift Strikes: gain +1 energy whenever this Pokemon attacks
+  if (attacker && attacker.hp > 0 && !isPassiveBlocked(G)) {
+    var atkData = PokemonDB.getPokemonData(attacker.name);
+    if (atkData && atkData.ability && atkData.ability.key === 'swiftStrikes') {
+      var beforeE = attacker.energy;
+      attacker.energy = Math.min(Constants.MAX_ENERGY, attacker.energy + 1);
+      var gained = attacker.energy - beforeE;
+      if (gained > 0) {
+        addLog(G, 'Swift Strikes: ' + attacker.name + ' gained 1 energy!', 'effect');
+        G.events.push({ type: 'energyGain', pokemon: attacker.name, amount: 1, source: 'swiftStrikes', owner: G.currentPlayer });
+        triggerHealingScarf(G, attacker);
+      }
+    }
+  }
+
   if (attacker && attacker.hp <= 0) {
     var koEvents = DamagePipeline.handleKO(G, attacker, G.currentPlayer);
     G.events = G.events.concat(koEvents);
@@ -561,7 +670,7 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     targetPk.energy = Math.min(Constants.MAX_ENERGY, targetPk.energy + energyAmount);
     var gained = targetPk.energy - before;
     if (gained > 0) {
-      G.events.push({ type: 'energyGain', pokemon: targetPk.name, amount: gained, source: 'benchEnergy', benchIdx: targetBenchIdx });
+      G.events.push({ type: 'energyGain', pokemon: targetPk.name, amount: gained, source: 'benchEnergy', benchIdx: targetBenchIdx, owner: G.currentPlayer });
       addLog(G, info.attacker.name + ' granted ' + gained + ' energy to ' + targetPk.name, 'effect');
     }
 
@@ -590,8 +699,11 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var selfBenchResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, selfBenchAtk, info.attackerTypes, targetPlayer, {
       attackSeq: info.attackSeq
     });
-    G.events.push({ type: 'selfBenchDmg', pokemon: targetPk.name, amount: info.baseDmg, benchIdx: targetBenchIdx });
-    G.events = G.events.concat(selfBenchResult.events);
+    G.events.push({ type: 'selfBenchDmg', pokemon: targetPk.name, amount: selfBenchResult.result.damage, benchIdx: targetBenchIdx, owner: G.currentPlayer });
+    // Filter out the 'damage' event from pipeline results — selfBenchDmg already shows
+    // the damage popup with the correct animation (recoil-shake). Include other events
+    // (itemProc, KO, etc.) so those still fire.
+    G.events = G.events.concat(selfBenchResult.events.filter(function(e) { return e.type !== 'damage'; }));
 
     var selfBenchFx = (info.attack && info.attack.fx) || '';
     var selfBenchRemainFx = selfBenchFx.replace(/selfBenchDmg:\d+/, '').trim();
@@ -615,6 +727,16 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     var stripAmount = info.amount || 0;
     if (stripAmount <= 0) return false;
     var actualStrip = Math.min(stripAmount, targetPk.energy);
+    // White Herb protection
+    var allStripItems = DamagePipeline.getHeldItems(targetPk);
+    if (allStripItems.indexOf('White Herb') !== -1 && !targetPk.heldItemUsed) {
+      var whPrevented = Math.min(actualStrip, 2);
+      actualStrip = Math.max(0, actualStrip - whPrevented);
+      targetPk.heldItemUsed = true;
+      if (targetPk.heldItem === 'White Herb') targetPk.heldItem = null;
+      if (targetPk.heldItems) { var whIdx = targetPk.heldItems.indexOf('White Herb'); if (whIdx !== -1) targetPk.heldItems.splice(whIdx, 1); }
+      G.events.push({ type: 'itemProc', item: 'White Herb', pokemon: targetPk.name, effect: 'preventEnergyLoss', prevented: whPrevented });
+    }
     targetPk.energy = Math.max(0, targetPk.energy - actualStrip);
     G.events.push({ type: 'energyStrip', pokemon: targetPk.name, amount: actualStrip, source: 'anyStrip', targetOwner: targetPlayer });
 
@@ -635,18 +757,18 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
   }
 
   // Targeted multi-hit targeting (e.g. Split Sludge Bomb)
+  // Phase 1: Collect all targets, then deal damage all at once
   if (info.type === 'multiTarget') {
-    var multiAtk = { baseDmg: info.baseDmg, fx: '' };
-    var multiResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, multiAtk, info.attackerTypes, targetPlayer, {
-      attackSeq: info.attackSeq
-    });
-    G.events = G.events.concat(multiResult.events);
+    // Store chosen target
+    if (!info.chosenTargets) info.chosenTargets = [];
+    info.chosenTargets.push({ player: targetPlayer, idx: targetBenchIdx, pk: targetPk });
 
     info.remaining = Math.max(0, (info.remaining || 0) - 1);
     info.validTargets = info.validTargets.filter(function(t) {
       return !(t.player === targetPlayer && t.idx === targetBenchIdx);
     });
 
+    // Still need more targets? Keep targeting
     if (info.remaining > 0 && info.validTargets.length > 0) {
       G.targeting = {
         type: 'multiTarget',
@@ -656,10 +778,23 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
       return true;
     }
 
+    // All targets chosen — now deal damage to all
+    var multiAtk = { baseDmg: info.baseDmg, fx: '' };
+    for (var mi = 0; mi < info.chosenTargets.length; mi++) {
+      var mt = info.chosenTargets[mi];
+      if (mt.pk && mt.pk.hp > 0) {
+        var multiResult = DamagePipeline.dealAttackDamage(G, info.attacker, mt.pk, multiAtk, info.attackerTypes, mt.player, {
+          attackSeq: info.attackSeq
+        });
+        G.events = G.events.concat(multiResult.events);
+      }
+    }
+
     var multiFx = (info.attack && info.attack.fx) || '';
     var multiRemainFx = multiFx.replace(/multiTarget:\d+:\d+/, '').trim();
     if (multiRemainFx) {
-      var multiFxResult = FXHandlers.processAll(G, multiRemainFx, info.attacker, targetPk, info.attack, false);
+      var lastTarget = info.chosenTargets[info.chosenTargets.length - 1];
+      var multiFxResult = FXHandlers.processAll(G, multiRemainFx, info.attacker, lastTarget ? lastTarget.pk : null, info.attack, false);
       G.events = G.events.concat(multiFxResult.events);
       if (multiFxResult.signal === 'pendingRetreat') return true;
       if (multiFxResult.signal === 'pendingTarget') {
@@ -712,15 +847,7 @@ function doRetreat(G) {
     return false;
   }
 
-  // Blockade check
-  var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
-    var oppData = PokemonDB.getPokemonData(oppActive.name);
-    if (oppData.ability && oppData.ability.key === 'blockade' && p.active.heldItem !== 'Protect Goggles') {
-      addLog(G, 'Blockade prevents retreat!', 'effect');
-      return false;
-    }
-  }
+  if (isBlockedByBlockade(G, p.active)) return false;
 
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'retreat' });
   G.events.push({ type: 'retreat_pending', player: G.currentPlayer });
@@ -743,15 +870,7 @@ function doQuickRetreat(G) {
   }
   if (p.active.energy < cost) return false;
 
-  // Blockade check
-  var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
-    var oppData = PokemonDB.getPokemonData(oppActive.name);
-    if (oppData.ability && oppData.ability.key === 'blockade' && p.active.heldItem !== 'Protect Goggles') {
-      addLog(G, 'Blockade prevents retreat!', 'effect');
-      return false;
-    }
-  }
+  if (isBlockedByBlockade(G, p.active)) return false;
 
   p.active.energy -= cost;
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
@@ -820,7 +939,7 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
     var gained = Math.min(transferEnergy, Constants.MAX_ENERGY - newActive.energy);
     newActive.energy += gained;
     addLog(G, 'Baton Pass: ' + newActive.name + ' gained ' + gained + ' energy!', 'effect');
-    G.events.push({ type: 'baton_pass', pokemon: newActive.name, energy: gained });
+    G.events.push({ type: 'baton_pass', pokemon: newActive.name, energy: gained, owner: pr.player });
   }
 
   // Exp. Share energy transfer on active KO
@@ -853,40 +972,64 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
 }
 
 // --- Play Pokemon from Hand ---
-function doPlayPokemon(G, handIdx, itemHandIdx) {
+function doPlayPokemon(G, handIdx, itemHandIdx, extraItemIndices) {
   _deps();
   var p = cp(G);
   var card = p.hand[handIdx];
   if (!card || card.type !== 'pokemon') return false;
   var data = PokemonDB.getPokemonData(card.name);
-  if (p.mana < data.cost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
+  if (p.mana < data.cost || p.pokeMana < data.cost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
 
   var heldItem = card.heldItem || null;
+  // Collect all indices to remove (sorted descending so splicing doesn't shift)
+  var indicesToRemove = [handIdx];
+
   // Attach item from hand
   if (itemHandIdx !== null && itemHandIdx !== undefined) {
     var itemCard = p.hand[itemHandIdx];
     if (itemCard && itemCard.type === 'items') {
       heldItem = itemCard.name;
-      if (itemHandIdx > handIdx) {
-        p.hand.splice(itemHandIdx, 1);
-        p.hand.splice(handIdx, 1);
-      } else {
-        p.hand.splice(handIdx, 1);
-        p.hand.splice(itemHandIdx, 1);
-      }
-    } else {
-      p.hand.splice(handIdx, 1);
+      indicesToRemove.push(itemHandIdx);
     }
-  } else {
-    p.hand.splice(handIdx, 1);
+  }
+
+  // Keyring: Klefki can attach up to 3 items total
+  var extraItems = [];
+  if (extraItemIndices && extraItemIndices.length > 0) {
+    for (var ei = 0; ei < extraItemIndices.length; ei++) {
+      var eiIdx = extraItemIndices[ei];
+      var eiCard = p.hand[eiIdx];
+      if (eiCard && eiCard.type === 'items' && indicesToRemove.indexOf(eiIdx) === -1) {
+        extraItems.push(eiCard.name);
+        indicesToRemove.push(eiIdx);
+      }
+    }
+  }
+
+  // Remove cards from hand (descending order to preserve indices)
+  indicesToRemove.sort(function(a, b) { return b - a; });
+  for (var ri = 0; ri < indicesToRemove.length; ri++) {
+    p.hand.splice(indicesToRemove[ri], 1);
   }
 
   p.mana -= data.cost;
+  p.pokeMana -= data.cost;
   var pk = makePokemon(card.name, heldItem);
+
+  // Apply extra Keyring items
+  if (extraItems.length > 0) {
+    pk.heldItems = [heldItem].concat(extraItems).filter(Boolean);
+    for (var xi = 0; xi < extraItems.length; xi++) {
+      applyExtraItem(pk, extraItems[xi], data);
+    }
+  }
+
   p.bench.push(pk);
   runOnPlayAbility(G, G.currentPlayer, pk);
-  addLog(G, 'Played ' + pk.name + (heldItem ? ' with ' + heldItem : '') + ' to bench', 'info');
-  G.events.push({ type: 'play_pokemon', pokemon: pk.name, heldItem: heldItem, player: G.currentPlayer });
+  var itemDesc = heldItem ? ' with ' + heldItem : '';
+  if (extraItems.length > 0) itemDesc += ' + ' + extraItems.join(', ');
+  addLog(G, 'Played ' + pk.name + itemDesc + ' to bench', 'info');
+  G.events.push({ type: 'play_pokemon', pokemon: pk.name, heldItem: heldItem, extraItems: extraItems, player: G.currentPlayer });
 
   // Shedinja: on-play strip energy
   if (data.ability && data.ability.key === 'soulDrain' && data.ability.type === 'onPlay') {
@@ -926,7 +1069,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
   if (fromBench && (data.ability.activeOnly || (data.ability.desc && /\(active\)/i.test(data.ability.desc)))) return false;
 
   // Check already used (except unlimited ones)
-  if (key !== 'magicDrain' && key !== 'bubbleCleanse' && p.usedAbilities[key]) {
+  if (key !== 'magicDrain' && key !== 'bubbleCleanse' && key !== 'healingTouch' && p.usedAbilities[key]) {
     addLog(G, 'Already used ' + data.ability.name + ' this turn!', 'info');
     return false;
   }
@@ -983,25 +1126,39 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_effect', ability: key, target: op(G).active.name });
       break;
 
-    case 'healingTouch': // Mega Audino: 1 mana, heal 30 + cure status
-      if (p.mana < 1) return false;
-      p.mana--;
-      // Target selection for heal
-      var htTargets = [];
-      var allMy = [p.active].concat(p.bench).filter(Boolean);
-      allMy.forEach(function(mpk, i) {
-        if (mpk.damage > 0 || (mpk.status && mpk.status.length > 0)) {
-          htTargets.push({ player: G.currentPlayer, idx: mpk === p.active ? -1 : p.bench.indexOf(mpk), pk: mpk });
-        }
-      });
-      if (htTargets.length > 0) {
-        G.targeting = {
-          type: 'healingTouch', validTargets: htTargets,
-          attackInfo: { sourceType: 'ability', type: 'healingTouch', attacker: pk }
-        };
+    case 'deadlySlice': // Seviper: deal 30 to opp active if poisoned
+      var dsTarget = op(G).active;
+      if (!dsTarget || dsTarget.hp <= 0) return false;
+      if (dsTarget.status.indexOf('poison') === -1) {
+        addLog(G, 'Deadly Slice failed — target is not Poisoned!', 'info');
+        return false;
+      }
+      var dsResult = DamagePipeline.applyDamage(G, dsTarget, 30, opp(G.currentPlayer));
+      addLog(G, 'Deadly Slice deals 30 to poisoned ' + dsTarget.name + '!', 'effect');
+      G.events.push({ type: 'ability_damage', ability: 'deadlySlice', target: dsTarget.name, amount: 30, owner: opp(G.currentPlayer) });
+      G.events = G.events.concat(dsResult.events);
+      if (dsResult.ko) {
+        var dsKoEvents = DamagePipeline.handleKO(G, dsTarget, op(G));
+        G.events = G.events.concat(dsKoEvents);
       }
       p.usedAbilities[key] = true;
-      G.events.push({ type: 'ability_effect', ability: key });
+      break;
+
+    case 'healingTouch': // Mega Audino: 1 mana, heal 30 + cure status on Active (unlimited)
+      if (p.mana < 1) return false;
+      if (!p.active) return false;
+      if (p.active.damage <= 0 && (!p.active.status || p.active.status.length === 0)) return false;
+      p.mana--;
+      var htTarget = p.active;
+      var htHealed = Math.min(30, htTarget.damage);
+      htTarget.damage = Math.max(0, htTarget.damage - 30);
+      htTarget.hp = htTarget.maxHp - htTarget.damage;
+      if (htTarget.status && htTarget.status.length > 0) {
+        addLog(G, 'Mega Checkup: cured ' + htTarget.name + "'s status!", 'heal');
+        htTarget.status = [];
+      }
+      if (htHealed > 0) addLog(G, 'Mega Checkup: healed ' + htHealed + ' from ' + htTarget.name, 'heal');
+      G.events.push({ type: 'ability_heal', ability: key, target: htTarget.name, amount: htHealed, owner: G.currentPlayer });
       break;
 
     case 'yummyDelivery': // Slurpuff: choose bench +1 energy free
@@ -1026,7 +1183,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       pk.damage = Math.max(0, pk.damage - 30);
       pk.hp = pk.maxHp - pk.damage;
       addLog(G, 'Bubble Cleanse: ' + pk.name + ' healed 30 (spent 1 energy)', 'heal');
-      G.events.push({ type: 'ability_heal', ability: key, target: pk.name, amount: 30, energySpent: 1 });
+      G.events.push({ type: 'ability_heal', ability: key, target: pk.name, amount: 30, energySpent: 1, owner: G.currentPlayer });
       break;
 
     case 'leafBoost': // Leafeon: target ally +1 energy then end turn
@@ -1060,13 +1217,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Ancient Energy: +1 energy to ' + p.active.name, 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: p.active.name });
-
-      // Healing Scarf
-      if (p.active.heldItem === 'Healing Scarf' && p.active.damage > 0) {
-        p.active.damage = Math.max(0, p.active.damage - 20);
-        p.active.hp = p.active.maxHp - p.active.damage;
-        addLog(G, 'Healing Scarf heals ' + p.active.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, p.active);
 
       // End turn immediately
       endTurn(G);
@@ -1138,15 +1289,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
     case 'phantomWalk': // Zorua: free retreat (active only)
       if (p.bench.length === 0) return false;
-      // Same blockade check but free
-      var oppAct = op(G).active;
-      if (oppAct && !isPassiveBlocked(G)) {
-        var oppD = PokemonDB.getPokemonData(oppAct.name);
-        if (oppD.ability && oppD.ability.key === 'blockade' && pk.heldItem !== 'Protect Goggles') {
-          addLog(G, 'Blockade prevents retreat!', 'effect');
-          return false;
-        }
-      }
+      if (isBlockedByBlockade(G, pk)) return false;
       G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
       p.usedAbilities[key] = true;
       addLog(G, 'Illusory Getaway! Free retreat', 'effect');
@@ -1170,13 +1313,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Electro Charge: ' + pk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: 1 });
-
-      // Healing Scarf
-      if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
-        pk.damage = Math.max(0, pk.damage - 20);
-        pk.hp = pk.maxHp - pk.damage;
-        addLog(G, 'Healing Scarf heals ' + pk.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, pk);
       break;
 
     case 'megaSpeed': // Mega Blaziken: +1 energy to self
@@ -1185,13 +1322,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       p.usedAbilities[key] = true;
       addLog(G, 'Mega Speed: ' + pk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name });
-
-      // Healing Scarf
-      if (pk.heldItem === 'Healing Scarf' && pk.damage > 0) {
-        pk.damage = Math.max(0, pk.damage - 20);
-        pk.hp = pk.maxHp - pk.damage;
-        addLog(G, 'Healing Scarf heals ' + pk.name + ' 20', 'heal');
-      }
+      triggerHealingScarf(G, pk);
       break;
 
     case 'magicDrain': // Mismagius: spend 1 mana, opp loses 1 (unlimited)
@@ -1219,13 +1350,34 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 }
 
 // --- Discard Held Item ---
-function doDiscardItem(G, slot, benchIdx) {
+function doDiscardItem(G, slot, benchIdx, itemName) {
   var p = cp(G);
   var pk = slot === 'active' ? p.active : p.bench[benchIdx];
-  if (!pk || !pk.heldItem) return false;
-  addLog(G, 'Discarded ' + pk.heldItem + ' from ' + pk.name, 'info');
-  G.events.push({ type: 'discard_item', pokemon: pk.name, item: pk.heldItem });
+  if (!pk) return false;
+  // If itemName specified, discard that specific item from heldItems array
+  if (itemName && pk.heldItems && pk.heldItems.length > 0) {
+    var idx = pk.heldItems.indexOf(itemName);
+    if (idx === -1) return false;
+    pk.heldItems.splice(idx, 1);
+    addLog(G, 'Discarded ' + itemName + ' from ' + pk.name, 'info');
+    G.events.push({ type: 'discard_item', pokemon: pk.name, item: itemName });
+    // If this was also the primary heldItem, update it
+    if (pk.heldItem === itemName) {
+      pk.heldItem = pk.heldItems.length > 0 ? pk.heldItems[0] : null;
+    }
+    return true;
+  }
+  // Default: discard primary heldItem
+  if (!pk.heldItem) return false;
+  var discarded = pk.heldItem;
+  addLog(G, 'Discarded ' + discarded + ' from ' + pk.name, 'info');
+  G.events.push({ type: 'discard_item', pokemon: pk.name, item: discarded });
   pk.heldItem = null;
+  if (pk.heldItems) {
+    var hIdx = pk.heldItems.indexOf(discarded);
+    if (hIdx !== -1) pk.heldItems.splice(hIdx, 1);
+    if (pk.heldItems.length > 0) pk.heldItem = pk.heldItems[0];
+  }
   return true;
 }
 
@@ -1244,13 +1396,20 @@ function checkStatusBeforeAttack(G, attacker) {
     return 'blocked';
   }
   if (attacker.status.indexOf('confusion') !== -1) {
-    if (Math.random() < 0.5) {
+    // Topsy Turvy: opponent's Malamar forces confusion coin to tails
+    var topsyTurvyActive = !isPassiveBlocked(G) && _oppHasPassive(G, G.currentPlayer, 'topsyTurvy');
+    var confusionCoinHeads = topsyTurvyActive ? false : (Math.random() < 0.5);
+    if (confusionCoinHeads) {
       attacker.status = attacker.status.filter(function(s) { return s !== 'confusion'; });
       addLog(G, attacker.name + ' snapped out of Confusion! (Heads)', 'info');
-      G.events.push({ type: 'status_cure', pokemon: attacker.name, status: 'confusion', reason: 'coinFlip' });
+      G.events.push({ type: 'status_cure', pokemon: attacker.name, status: 'confusion', reason: 'coinFlip', owner: G.currentPlayer });
       return 'ok';
     } else {
-      addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
+      if (topsyTurvyActive) {
+        addLog(G, 'Topsy Turvy forces tails! ' + attacker.name + ' is Confused!', 'effect');
+      } else {
+        addLog(G, attacker.name + ' is Confused! Attack failed (Tails)', 'info');
+      }
       G.events.push({ type: 'confusion_fail', pokemon: attacker.name });
       endTurn(G);
       return 'ended';
@@ -1292,7 +1451,7 @@ function getCopiedAttacks(G) {
 }
 
 // ============================================================
-// ABILITY TARGET RESOLUTION (softTouch, creepingChill, healingTouch)
+// ABILITY TARGET RESOLUTION (softTouch, creepingChill, etc.)
 // ============================================================
 function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
   if (!G.targeting) return false;
@@ -1312,15 +1471,7 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       targetPk.damage = Math.max(0, targetPk.damage - 10);
       targetPk.hp = targetPk.maxHp - targetPk.damage;
       addLog(G, 'Egg Drop Heal: ' + targetPk.name + ' healed 10', 'heal');
-      G.events.push({ type: 'ability_heal', ability: 'softTouch', target: targetPk.name, amount: 10 });
-      break;
-
-    case 'healingTouch':
-      targetPk.status = [];
-      targetPk.damage = Math.max(0, targetPk.damage - 30);
-      targetPk.hp = targetPk.maxHp - targetPk.damage;
-      addLog(G, 'Mega Checkup: ' + targetPk.name + ' healed 30 + status cured!', 'heal');
-      G.events.push({ type: 'ability_heal', ability: 'healingTouch', target: targetPk.name, amount: 30, cured: true });
+      G.events.push({ type: 'ability_heal', ability: 'softTouch', target: targetPk.name, amount: 10, owner: targetPlayer });
       break;
 
     case 'creepingChill':
@@ -1349,14 +1500,7 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       targetPk.energy++;
       addLog(G, 'Yummy Delivery: ' + targetPk.name + ' +1 energy!', 'effect');
       G.events.push({ type: 'ability_effect', ability: 'yummyDelivery', target: targetPk.name, amount: 1, benchIdx: targetBenchIdx });
-
-      // Healing Scarf on energy gain
-      if (targetPk.heldItem === 'Healing Scarf' && targetPk.damage > 0) {
-        targetPk.damage = Math.max(0, targetPk.damage - 20);
-        targetPk.hp = targetPk.maxHp - targetPk.damage;
-        addLog(G, 'Healing Scarf heals ' + targetPk.name + ' 20', 'heal');
-        G.events.push({ type: 'item_heal', item: 'Healing Scarf', pokemon: targetPk.name, amount: 20 });
-      }
+      triggerHealingScarf(G, targetPk);
       break;
 
     case 'leafBoost':
@@ -1560,9 +1704,9 @@ function processAction(G, playerNum, action) {
     case 'retreat': return finish(doRetreat(G));
     case 'quickRetreat': return finish(doQuickRetreat(G));
     case 'grantEnergy': return finish(doGrantEnergy(G, action.targetSlot, action.benchIdx));
-    case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx));
+    case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx, action.extraItemIndices));
     case 'useAbility': return finish(doUseAbility(G, action.key, action.sourceBenchIdx));
-    case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx));
+    case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx, action.itemName));
     case 'cancelTargeting': return finish(doCancelTargeting(G));
     case 'endTurn': return finish(doEndTurnAction(G));
     default: return finish(false);
