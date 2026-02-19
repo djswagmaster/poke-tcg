@@ -2012,6 +2012,7 @@ function applyServerState(state) {
     const sp = state.players[pNum];
     G.players[pNum].name = sp.name;
     G.players[pNum].mana = sp.mana;
+    G.players[pNum].pokeMana = sp.pokeMana;
     G.players[pNum].kos = sp.kos;
     G.players[pNum].maxBench = sp.maxBench || Constants.MAX_BENCH;
     G.players[pNum].active = sp.active;
@@ -2063,13 +2064,35 @@ function handleGameState(state, events) {
       // (like ko-fall) can render against the pre-event DOM state.
       G.log = state.log || [];
       G.animating = true;
+      
+      // Safety: ensure animating gets cleared even if something goes wrong
+      const clearAnimating = () => {
+        G.animating = false;
+      };
+      
       AnimQueue.replayEvents(events, animCtx);
       AnimQueue.setOnDrain(() => {
-        applyServerState(state);
-        G.animating = false;
-        renderBattle();
-        if (G.winner) showWin(G.winner);
+        try {
+          applyServerState(state);
+          G.animating = false;
+          renderBattle();
+          if (G.winner) showWin(G.winner);
+        } catch (e) {
+          console.error('[handleGameState] Error in onDrain:', e);
+          G.animating = false;
+          renderBattle();
+        }
       });
+      
+      // Fallback: if onDrain doesn't fire within 5 seconds, force clear
+      setTimeout(() => {
+        if (G.animating) {
+          console.warn('[handleGameState] onDrain timeout, force clearing animating');
+          G.animating = false;
+          applyServerState(state);
+          renderBattle();
+        }
+      }, 5000);
     } else {
       applyServerState(state);
       renderBattle();

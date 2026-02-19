@@ -109,7 +109,16 @@ var AnimQueue = (function() {
   }
 
   function replayEvents(events, animCtx) {
-    if (!events || events.length === 0) return;
+    if (!events || events.length === 0) {
+      // Empty events - immediately trigger onDrain if set
+      if (onDrain) {
+        var cb = onDrain;
+        onDrain = null;
+        // Use setTimeout to ensure it's async like normal flush
+        setTimeout(cb, 0);
+      }
+      return;
+    }
 
     var anims = [];
     for (var i = 0; i < events.length; i++) {
