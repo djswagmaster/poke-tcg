@@ -33,8 +33,8 @@ void 0; // placeholder
 const G = {
   phase:'deckBuildP1', currentPlayer:1, turn:0,
   players: {
-    1: { name:'Player 1', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
-    2: { name:'Player 2', mana:0, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
+    1: { name:'Player 1', mana:0, pokeMana:25, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
+    2: { name:'Player 2', mana:0, pokeMana:25, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
   },
   log: [],
   events: [], // Event array used by shared game-logic
@@ -501,6 +501,7 @@ function snapshotGameState() {
     const p = G.players[pNum];
     snap.players[pNum] = {
       mana: p.mana,
+      pokeMana: p.pokeMana,
       kos: p.kos,
       maxBench: p.maxBench,
       active: clonePokemon(p.active),
@@ -523,6 +524,7 @@ function restoreGameState(snap) {
   for (let pNum = 1; pNum <= 2; pNum++) {
     const sp = snap.players[pNum];
     G.players[pNum].mana = sp.mana;
+    G.players[pNum].pokeMana = sp.pokeMana;
     G.players[pNum].kos = sp.kos;
     G.players[pNum].maxBench = sp.maxBench || Constants.MAX_BENCH;
     G.players[pNum].active = sp.active;
@@ -1019,7 +1021,7 @@ function showSetupScreen() {
 
   const phaseText = isActivePhase ? `${p.name}: Choose Active Pokémon + Item` : `${p.name}: Choose Bench Pokémon + Items`;
   document.getElementById('setupPhaseText').textContent = phaseText;
-  document.getElementById('setupMana').textContent = `Mana: ${p.mana}`;
+  document.getElementById('setupMana').textContent = `Mana: ${p.mana} | Poke-Mana: ${p.pokeMana}`;
 
   renderSetup();
 }
@@ -1028,6 +1030,9 @@ function renderSetup() {
   const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
   const isActivePhase = setupStep < 2;
   const p = G.players[playerNum];
+
+  // Update mana display
+  document.getElementById('setupMana').textContent = `Mana: ${p.mana} | Poke-Mana: ${p.pokeMana}`;
 
   const hand = document.getElementById('setupHand');
   const placedNames = new Set();
@@ -1080,7 +1085,7 @@ function renderSetup() {
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
-      const canAfford = p.mana >= data.cost;
+      const canAfford = p.mana >= data.cost && p.pokeMana >= data.cost;
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `selectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
         <span class="cost-badge">${data.cost}⬡</span>
@@ -1122,8 +1127,6 @@ function renderSetup() {
   const canConfirm = (setupSelected.length > 0 && !setupItemFor) || canConfirmBench;
   const benchBtnText = isActivePhase ? 'Confirm Active' : (setupSelected.length === 0 ? 'Skip Bench' : 'Confirm Bench');
   preview.innerHTML = previewHtml + `<button class="setup-confirm-btn ${canConfirm ? 'db-confirm-btn ready' : 'db-confirm-btn disabled'}" onclick="confirmSetup()" ${canConfirm ? '' : 'disabled'}>${benchBtnText}</button>`;
-
-  document.getElementById('setupMana').textContent = `Mana: ${p.mana}`;
 }
 
 function selectSetupPokemon(name) {
@@ -1134,9 +1137,10 @@ function selectSetupPokemon(name) {
   if (!isActivePhase && setupSelected.length >= (p.maxBench || Constants.MAX_BENCH)) return;
 
   const data = getPokemonData(name);
-  if (p.mana < data.cost) return;
+  if (p.mana < data.cost || p.pokeMana < data.cost) return;
 
   p.mana -= data.cost;
+  p.pokeMana -= data.cost;
   setupItemFor = name;
   setupKeyringItems = [];
   renderSetup();
@@ -1147,7 +1151,10 @@ function cancelSetupItem() {
   const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
   const p = G.players[playerNum];
   const data = getPokemonData(setupItemFor);
-  if (data) p.mana += data.cost;
+  if (data) {
+    p.mana += data.cost;
+    p.pokeMana += data.cost;
+  }
   setupItemFor = null;
   setupKeyringItems = [];
   renderSetup();
@@ -1180,7 +1187,10 @@ function unselectSetup(idx) {
   const playerNum = (setupStep < 2) ? (setupStep === 0 ? 1 : 2) : (setupStep === 2 ? 1 : 2);
   const p = G.players[playerNum];
   const data = getPokemonData(removed.name);
-  if (data) p.mana += data.cost;
+  if (data) {
+    p.mana += data.cost;
+    p.pokeMana += data.cost;
+  }
   renderSetup();
 }
 
@@ -1317,6 +1327,12 @@ function renderBattle() {
     turnText += ' (Waiting...)';
   }
   document.getElementById('btTurn').textContent = turnText;
+
+  // Update top bar mana displays
+  document.getElementById('btP1Mana').textContent = G.players[1].mana + '⬡';
+  document.getElementById('btP2Mana').textContent = G.players[2].mana + '⬡';
+  document.getElementById('btP1PokeMana').textContent = G.players[1].pokeMana + '⬡';
+  document.getElementById('btP2PokeMana').textContent = G.players[2].pokeMana + '⬡';
 
   // Removed KO counter rendering - no longer using KO count win condition
 
@@ -2086,7 +2102,7 @@ function showOnlineSetupScreen(phase) {
   const isActive = phase === 'setupActive';
   const phaseText = isActive ? `${myP.name}: Choose Active Pokémon + Item` : `${myP.name}: Choose Bench Pokémon + Items`;
   document.getElementById('setupPhaseText').textContent = phaseText;
-  document.getElementById('setupMana').textContent = `Mana: ${myP.mana}`;
+  document.getElementById('setupMana').textContent = `Mana: ${myP.mana} | Poke-Mana: ${myP.pokeMana}`;
 
   // Turn-based online setup: if it's not your turn, show a waiting screen.
   if (G.currentPlayer !== myPlayerNum) {
@@ -2142,6 +2158,7 @@ function renderOnlineSetup() {
   // Virtual remaining mana while selecting (server only decrements on confirm).
   const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
   const remainingMana = Math.max(0, (myP.mana || 0) - spent);
+  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spent);
 
   const placedNames = new Set();
   if (myP.active) placedNames.add(myP.active.name);
@@ -2166,7 +2183,7 @@ function renderOnlineSetup() {
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
-      const canAfford = remainingMana >= data.cost;
+      const canAfford = remainingMana >= data.cost && remainingPokeMana >= data.cost;
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `onlineSelectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
         <span class="cost-badge">${data.cost}⬡</span>
@@ -2231,11 +2248,12 @@ function onlineSelectSetupPokemon(name) {
   const isActive = G.phase === 'setupActive';
   if (isActive && onlineSetupSelected.length >= 1) return;
   if (!isActive && onlineSetupSelected.length >= (myP.maxBench || Constants.MAX_BENCH)) return;
-  // Enforce remaining mana client-side.
+  // Enforce remaining mana and poke-mana client-side.
   const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
   const remainingMana = Math.max(0, (myP.mana || 0) - spent);
+  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spent);
   const data = getPokemonData(name);
-  if (!data || remainingMana < data.cost) return;
+  if (!data || remainingMana < data.cost || remainingPokeMana < data.cost) return;
   onlineSetupItemFor = name;
   renderOnlineSetup();
 }

@@ -1577,8 +1577,9 @@ function processSetupChoice(G, playerNum, choices) {
 
     var pokData = PokemonDB.getPokemonData(card.name);
     var cost = pokData ? pokData.cost : 0;
-    if (p.mana < cost) return false;
+    if (p.mana < cost || p.pokeMana < cost) return false;
     p.mana -= cost;
+    p.pokeMana -= cost;
 
     p.active = makePokemon(card.name, heldItem);
     runOnPlayAbility(G, playerNum, p.active);
@@ -1619,7 +1620,7 @@ function processSetupChoice(G, playerNum, choices) {
 
       var bPokData = PokemonDB.getPokemonData(bcard.name);
       var bCost = bPokData ? bPokData.cost : 0;
-      if (p.mana < bCost) return;
+      if (p.mana < bCost || p.pokeMana < bCost) return;
 
       var itemIdx = sel.itemIdx;
       var bHeldItem = null;
@@ -1631,6 +1632,7 @@ function processSetupChoice(G, playerNum, choices) {
       }
 
       p.mana -= bCost;
+      p.pokeMana -= bCost;
       var setupPk = makePokemon(bcard.name, bHeldItem);
       p.bench.push(setupPk);
       runOnPlayAbility(G, playerNum, setupPk);

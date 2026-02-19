@@ -83,6 +83,7 @@ button { cursor:pointer; font-family:inherit; }
 .bt-ko { width:14px; height:14px; border-radius:50%; border:2px solid rgba(255,255,255,0.15); transition:all 0.3s; }
 .bt-ko.filled { background:#ef4444; border-color:#ef4444; box-shadow:0 0 8px rgba(239,68,68,0.4); }
 .bt-mana { color:#38bdf8; font-weight:900; font-size:20px; background:rgba(56,189,248,0.1); padding:4px 12px; border-radius:8px; border:1px solid rgba(56,189,248,0.25); transition:all 0.3s; }
+.bt-poke-mana { color:#ef4444; font-weight:900; font-size:20px; background:rgba(239,68,68,0.1); padding:4px 12px; border-radius:8px; border:1px solid rgba(239,68,68,0.25); transition:all 0.3s; }
 .bt-turn { color:#888; font-size:13px; font-weight:700; }
 
 .battle-field { flex:1; display:flex; flex-direction:column; position:relative; overflow:auto; cursor:grab; }
@@ -573,6 +574,7 @@ button { cursor:pointer; font-family:inherit; }
   .battle-top-bar { height:40px; padding:0 10px; }
   .bt-name { font-size:12px; }
   .bt-mana { font-size:16px; padding:2px 8px; }
+  .bt-poke-mana { font-size:16px; padding:2px 8px; }
   .bt-ko { width:10px; height:10px; }
   .bt-turn { font-size:11px; }
 
@@ -616,4 +618,5 @@ button { cursor:pointer; font-family:inherit; }
   .battle-top-bar { height:36px; }
   .bt-name { font-size:10px; }
   .bt-mana { font-size:14px; }
+  .bt-poke-mana { font-size:14px; }
 }
