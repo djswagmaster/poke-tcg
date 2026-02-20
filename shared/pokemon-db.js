@@ -32,7 +32,7 @@ var POKEMON_DB = [
     ability:{name:"Biting Whirlpool",desc:"10 dmg when opp gains energy",type:"passive",key:"bitingWhirlpool"},
     attacks:[{name:"Electro Ball",energy:2,baseDmg:70,desc:"",fx:""}]},
 
-  {name:"Baxcalibur",types:["Dragon","Ice"],cost:5,hp:260,weakness:["Fairy","Fire"],resistance:["Grass","Ice"],
+  {name:"Baxcalibur",types:["Dragon","Ice"],cost:5,hp:260,weakness:["Dragon","Rock"],resistance:["Grass","Ice"],
     attacks:[{name:"Dragon Dance",energy:1,baseDmg:0,desc:"Gain +2 energy",fx:"selfEnergy:2"},
              {name:"Glaive Rush",energy:3,baseDmg:160,desc:"Take 60 more dmg next turn",fx:"selfVuln:60"}]},
 
@@ -91,7 +91,7 @@ var POKEMON_DB = [
     attacks:[{name:"Cursed Look",energy:1,baseDmg:0,desc:"Strip 2 energy",fx:"stripEnergy:2"},
              {name:"Shadow Ball",energy:3,baseDmg:120,desc:"",fx:""}]},
 
-  {name:"Giratina",types:["Psychic"],cost:6,hp:300,weakness:["Ghost","Dragon"],resistance:["Normal","Grass"],
+  {name:"Giratina",types:["Ghost","Dragon"],cost:6,hp:300,weakness:["Ghost","Dragon"],resistance:["Normal","Grass"],
     ability:{name:"Dimension Door",desc:"This Pokemon can attack even while it is on your Bench",type:"passive",key:"dimensionDoor"},
     attacks:[{name:"Broken-Space Blow",energy:4,baseDmg:100,desc:"+10 per benched Pokemon",fx:"scaleBenchAll:10"}]},
 
@@ -175,7 +175,7 @@ var POKEMON_DB = [
     ability:{name:"Magma Sear",desc:"Opp burn recovery coin always tails; deal 10 extra damage",type:"passive",key:"magmaSear"},
     attacks:[{name:"Lava Toss",energy:3,baseDmg:70,desc:"Burn",fx:"burn"}]},
 
-  {name:"Malamar",types:["Psychic"],cost:4,hp:200,weakness:["Fairy"],resistance:["Psychic"],
+  {name:"Malamar",types:["Dark","Psychic"],cost:4,hp:200,weakness:["Fairy","Dark"],resistance:["Ghost","Fighting"],
     ability:{name:"Topsy Turvy",desc:"Opp confused coin flip always treated as tails",type:"passive",key:"topsyTurvy"},
     attacks:[{name:"Psychic Jumble",energy:3,baseDmg:50,desc:"Confuse",fx:"confuse"}]},
 
@@ -274,7 +274,7 @@ var POKEMON_DB = [
     attacks:[{name:"Bloom Blade",energy:1,baseDmg:40,desc:"Bench +1 energy",fx:"benchEnergy:1"},
              {name:"Slime Slicer",energy:3,baseDmg:90,desc:"Poison",fx:"poison"}]},
 
-  {name:"Salazzle",types:["Poison"],cost:4,hp:180,weakness:["Psychic","Water"],resistance:["Bug","Fairy"],
+  {name:"Salazzle",types:["Poison","Fire"],cost:4,hp:180,weakness:["Psychic","Water"],resistance:["Bug","Fairy"],
     attacks:[{name:"Corro-Burn",energy:1,baseDmg:40,desc:"Burn and Poison",fx:"burn,poison"}]},
 
   {name:"Scovillain",types:["Grass","Fire"],cost:4,hp:180,weakness:["Poison"],resistance:["Water","Fairy"],
@@ -325,14 +325,14 @@ var POKEMON_DB = [
     ability:{name:"Gutsy Generator",desc:"If this Pokemon has any damage on it, gain 1 mana. If you do, your turn ends.",type:"active",key:"gutsyGenerator"},
     attacks:[{name:"Crash Kick",energy:2,baseDmg:40,desc:"This Pokemon also does 20 damage to itself",fx:"selfDmg:20"}]},
 
-  {name:"Tyranitar",types:["Normal"],cost:5,hp:280,weakness:["Steel","Fairy"],resistance:["Flying","Dark"],
+  {name:"Tyranitar",types:["Rock","Dark"],cost:5,hp:280,weakness:["Steel","Fairy"],resistance:["Flying","Dark"],
     ability:{name:"Sand Stream",desc:"At the end of your turn, if this is your Active Pokemon, deal 10 damage to each of your opponent's Pokemon",type:"passive",key:"sandStream"},
     attacks:[{name:"Mega Crush",energy:4,baseDmg:120,desc:"Both Active Pokemon lose 2 Energy",fx:"mutualEnergyLoss:2"}]},
 
   {name:"Cleffa",types:["Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Water"],
     attacks:[{name:"Twinkly Generator",energy:1,baseDmg:0,desc:"Grant 1 of your Benched Pokemon +1 energy",fx:"benchEnergy:1"}]},
 
-  {name:"Azurill",types:["Normal","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Normal","Water"],
+  {name:"Azurill",types:["Normal","Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Ghost","Dragon"],
     ability:{name:"Bouncy Generator",desc:"If this is your Active Pokemon and is Knocked Out, gain 1 mana.",type:"passive",key:"bouncyGenerator"},
     attacks:[{name:"Squish",energy:2,baseDmg:10,desc:"Heal 10 damage from this Pokemon",fx:"healSelf:10"}]},
 
