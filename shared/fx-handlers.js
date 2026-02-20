@@ -210,6 +210,56 @@ register('selfEnergyLoss', function(G, ctx, params) {
   return null;
 });
 
+// --- Mutual energy loss (both actives lose energy) ---
+register('mutualEnergyLoss', function(G, ctx, params) {
+  _deps();
+  var v = params[0] || 1;
+  
+  // Attacker loses energy
+  var atkItems = DamagePipeline.getHeldItems(ctx.attacker);
+  var atkLoss = v;
+  if (atkItems.indexOf('White Herb') !== -1 && !ctx.attacker.heldItemUsed) {
+    var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.attacker, amount: atkLoss });
+    if (whResult) {
+      atkLoss = Math.max(0, atkLoss - (whResult.prevented || 0));
+      if (whResult.discard) {
+        ctx.attacker.heldItemUsed = true;
+        if (ctx.attacker.heldItem === 'White Herb') ctx.attacker.heldItem = null;
+        if (ctx.attacker.heldItems) { var wi = ctx.attacker.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.attacker.heldItems.splice(wi, 1); }
+      }
+      ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.attacker.name, effect: 'preventEnergyLoss', prevented: whResult.prevented });
+    }
+  }
+  ctx.attacker.energy = Math.max(0, ctx.attacker.energy - atkLoss);
+  if (atkLoss > 0) {
+    ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: atkLoss, owner: ctx.currentPlayer });
+  }
+
+  // Defender loses energy
+  if (ctx.defender && ctx.defender.hp > 0) {
+    var defItems = DamagePipeline.getHeldItems(ctx.defender);
+    var defLoss = v;
+    if (defItems.indexOf('White Herb') !== -1 && !ctx.defender.heldItemUsed) {
+      var whDefResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.defender, amount: defLoss });
+      if (whDefResult) {
+        defLoss = Math.max(0, defLoss - (whDefResult.prevented || 0));
+        if (whDefResult.discard) {
+          ctx.defender.heldItemUsed = true;
+          if (ctx.defender.heldItem === 'White Herb') ctx.defender.heldItem = null;
+          if (ctx.defender.heldItems) { var wi = ctx.defender.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.defender.heldItems.splice(wi, 1); }
+        }
+        ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.defender.name, effect: 'preventEnergyLoss', prevented: whDefResult.prevented });
+      }
+    }
+    ctx.defender.energy = Math.max(0, ctx.defender.energy - defLoss);
+    if (defLoss > 0) {
+      ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: defLoss, targetOwner: ctx.oppPlayerNum });
+    }
+  }
+  
+  return null;
+});
+
 // --- Extra turn ---
 register('extraTurn', function(G, ctx, params) {
   G.extraTurnFor = ctx.currentPlayer;
@@ -401,6 +451,7 @@ register('healAll', function(G, ctx, params) {
 // --- Lock attack ---
 register('lockAttack', function(G, ctx, params) {
   ctx.attacker.cantUseAttack = ctx.attack.name;
+  ctx.attacker.cantUseAttackUntilTurn = G.turn + 2;
   ctx.events.push({ type: 'lockAttack', pokemon: ctx.attacker.name, attack: ctx.attack.name });
   return null;
 });
@@ -481,18 +532,29 @@ register('swarmSnipe', function(G, ctx, params) {
   return null;
 });
 
-// --- Conditional bench damage ---
+// --- Conditional bench damage (target one bench Pokemon if threshold met) ---
 register('condBench', function(G, ctx, params) {
   _deps();
   var threshold = params[0] || 0;
   var dmg = params[1] || 0;
   if (ctx.attacker.energy >= threshold && ctx.oppPlayer.bench.length > 0) {
-    var condAtk = { baseDmg: dmg, fx: '' };
-    ctx.oppPlayer.bench.forEach(function(pk) {
-      var result = DamagePipeline.dealAttackDamage(G, ctx.attacker, pk, condAtk, ctx.attackerTypes, ctx.oppPlayerNum);
-      ctx.events = ctx.events.concat(result.events);
+    var validTargets = [];
+    ctx.oppPlayer.bench.forEach(function(pk, bi) {
+      if (pk.hp > 0) validTargets.push({ player: ctx.oppPlayerNum, idx: bi, pk: pk });
     });
-    ctx.events.push({ type: 'condBench', threshold: threshold, dmg: dmg });
+    
+    if (validTargets.length > 0) {
+      ctx.targetingInfo = {
+        type: 'condBench',
+        validTargets: validTargets,
+        baseDmg: dmg,
+        attackerTypes: ctx.attackerTypes,
+        attacker: ctx.attacker,
+        attack: ctx.attack,
+        threshold: threshold
+      };
+      return 'pendingTarget';
+    }
   }
   return null;
 });

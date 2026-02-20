@@ -88,18 +88,37 @@ function calcWeaknessResistance(attackerTypes, defender, currentTurn) {
 // ============================================================
 // PASSIVE BLOCKED CHECK
 // ============================================================
-function isPassiveBlocked(G) {
+function isPassiveBlocked(G, pokemon) {
   // Neutralizing Gas blocks passives if any Pokemon in play has it
+  // BUT it only blocks ACTIVE Pokemon abilities, not benched ones
   _deps();
+  var hasNeutralizingGas = false;
   for (var pNum = 1; pNum <= 2; pNum++) {
     var side = G.players[pNum];
     var all = [side.active].concat(side.bench).filter(Boolean);
     for (var i = 0; i < all.length; i++) {
       var d = PokemonDB.getPokemonData(all[i].name);
-      if (d.ability && d.ability.key === 'neutralizingGas') return true;
+      if (d.ability && d.ability.key === 'neutralizingGas') {
+        hasNeutralizingGas = true;
+        break;
+      }
     }
+    if (hasNeutralizingGas) break;
   }
-  return false;
+  
+  if (!hasNeutralizingGas) return false;
+  
+  // If pokemon parameter provided, check if it's active
+  if (pokemon) {
+    for (var pNum = 1; pNum <= 2; pNum++) {
+      var side = G.players[pNum];
+      if (side.active === pokemon) return true; // Active pokemon abilities are blocked
+    }
+    return false; // Bench pokemon abilities are NOT blocked
+  }
+  
+  // If no pokemon specified, return true (for general checks)
+  return true;
 }
 
 // ============================================================
@@ -158,7 +177,11 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
     fxVal = parseInt(fx.split('scaleBench:')[1]);
     var myBench = G.players[currentPlayer].bench;
     baseDmg += fxVal * myBench.length;
-    baseDmg = Math.min(baseDmg, 140);
+  }
+  if (fx.indexOf('scaleBenchAll:') !== -1) {
+    fxVal = parseInt(fx.split('scaleBenchAll:')[1]);
+    var myBench = G.players[currentPlayer].bench;
+    baseDmg += fxVal * myBench.length;
   }
   if (fx.indexOf('sustained:') !== -1 && attacker.sustained) { baseDmg += parseInt(fx.split('sustained:')[1]); }
   if (fx.indexOf('berserk') !== -1) { baseDmg += attacker.damage; }
@@ -191,7 +214,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
   if (!ignoreReduction) {
     // Ability-based reduction (damageReduce:N)
-    if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G)) {
+    if (defAbility && defAbility.key && defAbility.key.indexOf('damageReduce:') === 0 && !isPassiveBlocked(G, defender)) {
       reduction += parseInt(defAbility.key.split(':')[1]);
     }
 
@@ -204,10 +227,11 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
 
     // Aurora Veil (team-wide passive)
     var allDefPokemon = [defPlayer.active].concat(defPlayer.bench).filter(Boolean);
-    if (!isPassiveBlocked(G)) {
-      for (var i = 0; i < allDefPokemon.length; i++) {
-        var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
-        if (pData.ability && pData.ability.key === 'auroraVeil') { reduction += 10; break; }
+    for (var i = 0; i < allDefPokemon.length; i++) {
+      var pData = PokemonDB.getPokemonData(allDefPokemon[i].name);
+      if (pData.ability && pData.ability.key === 'auroraVeil' && !isPassiveBlocked(G, allDefPokemon[i])) { 
+        reduction += 10; 
+        break; 
       }
     }
 
@@ -250,7 +274,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   if (resistResult && resistResult.immune) totalDmg = 0;
 
   // Mega Aggron Filter: block any final damage <= 50
-  if (!ignoreReduction && defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G)) {
+  if (!ignoreReduction && defAbility && defAbility.key === 'filter' && totalDmg > 0 && totalDmg <= 50 && !isPassiveBlocked(G, defender)) {
     return { damage: 0, mult: mult, filtered: true, luckyProc: luckyProc, reduction: reduction };
   }
 
@@ -393,7 +417,7 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
 
   // Azurill: Bouncy Generator (active KO grants 1 mana)
   var ownerActiveData = PokemonDB.getPokemonData(pokemon.name);
-  if (owner.active === pokemon && ownerActiveData.ability && ownerActiveData.ability.key === 'bouncyGenerator' && !isPassiveBlocked(G)) {
+  if (owner.active === pokemon && ownerActiveData.ability && ownerActiveData.ability.key === 'bouncyGenerator' && !isPassiveBlocked(G, pokemon)) {
     var prevMana = owner.mana;
     owner.mana = Math.min(Constants.MAX_MANA, owner.mana + 1);
     var gained = owner.mana - prevMana;
@@ -453,6 +477,11 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
 function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, defenderOwner) {
   _deps();
   var events = [];
+
+  // Reactive items should only trigger when the holder is the active pokemon
+  var defenderPlayer = G.players[defenderOwner];
+  var isDefenderActive = defenderPlayer.active === defender;
+  if (!isDefenderActive) return events;
 
   // Reactive on-damaged items should still trigger even if the holder was
   // KO'd by the hit (e.g. Rocky Helmet retaliation on lethal contact).

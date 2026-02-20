@@ -56,7 +56,8 @@ var POKEMON_DB = [
     attacks:[{name:"Gift Delivery",energy:2,baseDmg:0,desc:"Each bench +1 energy",fx:"benchEnergyAll"}]},
 
   {name:"Dialga",types:["Steel","Dragon"],cost:6,hp:280,weakness:["Fighting","Dragon"],resistance:["Ghost","Grass"],
-    attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Lose 2 energy. Take another turn after this one. Can't attack during your next turn",fx:"selfEnergyLoss:2,extraTurn,lockAttack"}]},
+    ability:{name:"Time Dilation",desc:"Whenever this Pokemon attacks, it loses 2 Energy",type:"passive",key:"timeDilation"},
+    attacks:[{name:"Roar of Time",energy:4,baseDmg:100,desc:"Take another turn after this one. Can't attack during your next turn",fx:"extraTurn,lockAttack"}]},
 
   {name:"Ditto",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
     ability:{name:"Improvised Attack",desc:"Spend 1 energy: gain opp's attacks this turn",type:"active",key:"improvise",activeOnly:true},
@@ -89,6 +90,10 @@ var POKEMON_DB = [
   {name:"Gengar",types:["Ghost","Poison"],cost:4,hp:180,weakness:["Dark","Ground"],resistance:["Normal","Fairy"],
     attacks:[{name:"Cursed Look",energy:1,baseDmg:0,desc:"Strip 2 energy",fx:"stripEnergy:2"},
              {name:"Shadow Ball",energy:3,baseDmg:120,desc:"",fx:""}]},
+
+  {name:"Giratina",types:["Psychic"],cost:6,hp:300,weakness:["Ghost","Dragon"],resistance:["Normal","Grass"],
+    ability:{name:"Dimension Door",desc:"This Pokemon can attack even while it is on your Bench",type:"passive",key:"dimensionDoor"},
+    attacks:[{name:"Broken-Space Blow",energy:4,baseDmg:100,desc:"+10 per benched Pokemon",fx:"scaleBenchAll:10"}]},
 
   {name:"Glaceon",types:["Ice"],cost:4,hp:230,weakness:["Fire"],resistance:["Ice"],
     attacks:[{name:"Ice Shard",energy:1,baseDmg:40,desc:"Hit any Pokemon",fx:"snipe"},
@@ -269,6 +274,9 @@ var POKEMON_DB = [
     attacks:[{name:"Bloom Blade",energy:1,baseDmg:40,desc:"Bench +1 energy",fx:"benchEnergy:1"},
              {name:"Slime Slicer",energy:3,baseDmg:90,desc:"Poison",fx:"poison"}]},
 
+  {name:"Salazzle",types:["Poison"],cost:4,hp:180,weakness:["Psychic","Water"],resistance:["Bug","Fairy"],
+    attacks:[{name:"Corro-Burn",energy:1,baseDmg:40,desc:"Burn and Poison",fx:"burn,poison"}]},
+
   {name:"Scovillain",types:["Grass","Fire"],cost:4,hp:180,weakness:["Poison"],resistance:["Water","Fairy"],
     attacks:[{name:"Chili Bite",energy:1,baseDmg:40,desc:"Burn",fx:"burn"},
              {name:"Spicy Rage",energy:3,baseDmg:40,desc:"+dmg on self",fx:"berserk"}]},
@@ -306,7 +314,7 @@ var POKEMON_DB = [
 
   {name:"Suicune",types:["Water"],cost:5,hp:280,weakness:["Electric"],resistance:["Fire"],
     ability:{name:"Freezing Winds",desc:"Strip 1 energy from opp Active",type:"passive",key:"aquaRing"},
-    attacks:[{name:"Crystal Shimmer",energy:3,baseDmg:60,desc:"+20 per bench (max 140)",fx:"scaleBench:20"}]},
+    attacks:[{name:"Crystal Shimmer",energy:3,baseDmg:60,desc:"+20 per bench",fx:"scaleBench:20"}]},
 
   {name:"Sylveon",types:["Fairy"],cost:4,hp:250,weakness:["Steel"],resistance:["Dragon"],
     attacks:[{name:"Magical Gift",energy:1,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"},
@@ -316,6 +324,10 @@ var POKEMON_DB = [
   {name:"Tyrogue",types:["Fighting"],cost:1,hp:100,weakness:["Flying"],resistance:["Rock"],
     ability:{name:"Gutsy Generator",desc:"If this Pokemon has any damage on it, gain 1 mana. If you do, your turn ends.",type:"active",key:"gutsyGenerator"},
     attacks:[{name:"Crash Kick",energy:2,baseDmg:40,desc:"This Pokemon also does 20 damage to itself",fx:"selfDmg:20"}]},
+
+  {name:"Tyranitar",types:["Normal"],cost:5,hp:280,weakness:["Steel","Fairy"],resistance:["Flying","Dark"],
+    ability:{name:"Sand Stream",desc:"At the end of your turn, if this is your Active Pokemon, deal 10 damage to each of your opponent's Pokemon",type:"passive",key:"sandStream"},
+    attacks:[{name:"Mega Crush",energy:4,baseDmg:120,desc:"Both Active Pokemon lose 2 Energy",fx:"mutualEnergyLoss:2"}]},
 
   {name:"Cleffa",types:["Fairy"],cost:1,hp:130,weakness:["Poison"],resistance:["Water"],
     attacks:[{name:"Twinkly Generator",energy:1,baseDmg:0,desc:"Grant 1 of your Benched Pokemon +1 energy",fx:"benchEnergy:1"}]},

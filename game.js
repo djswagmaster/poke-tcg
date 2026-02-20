@@ -94,7 +94,14 @@ function isNeutralizingGasActive() {
   const all = [G.players[1].active, ...G.players[1].bench, G.players[2].active, ...G.players[2].bench].filter(Boolean);
   return all.some(pk => { const d = getPokemonData(pk.name); return d.ability && d.ability.key === 'neutralizingGas'; });
 }
-function isPassiveBlocked() { return isNeutralizingGasActive(); }
+function isPassiveBlocked(pokemon) {
+  if (!isNeutralizingGasActive()) return false;
+  // If pokemon provided, check if it's active (only active abilities are blocked)
+  if (pokemon) {
+    return G.players[1].active === pokemon || G.players[2].active === pokemon;
+  }
+  return true; // General check
+}
 
 // Delegate to shared module (adds types/weakness/resistance fields needed by game-logic)
 function makePokemon(name, heldItem) { return GameLogic.makePokemon(name, heldItem); }
@@ -634,6 +641,23 @@ async function actionAttack(attackIndex, forceOptBoost = null) {
     return;
   }
   dispatchAction({ type: 'attack', attackIndex, useOptBoost });
+}
+
+async function actionBenchAttack(benchIdx, attackIndex, forceOptBoost = null) {
+  if (G.animating) return;
+  const myP = isOnline ? me() : cp();
+  const attacker = myP.bench[benchIdx];
+  if (!attacker) return;
+  const data = getPokemonData(attacker.name);
+  const attack = data.attacks[attackIndex];
+
+  let useOptBoost = forceOptBoost === true;
+
+  if (isOnline) {
+    sendAction({ actionType: 'benchAttack', benchIdx, attackIndex, useOptBoost });
+    return;
+  }
+  dispatchAction({ type: 'benchAttack', benchIdx, attackIndex, useOptBoost });
 }
 
 function actionRetreat() {
@@ -1320,9 +1344,12 @@ function renderBattle() {
   document.getElementById('btP1Mana').textContent = G.players[1].mana + '⬡';
   document.getElementById('btP2Mana').textContent = G.players[2].mana + '⬡';
   let turnText = `Turn ${G.turn} — ${cp().name}`;
-  if (G.pendingRetreats.length > 0 && G.pendingRetreats[0].reason === 'ko') {
-    const prPlayer = G.players[G.pendingRetreats[0].player];
-    turnText = `Turn ${G.turn} — ${prPlayer.name} must choose new Active`;
+  if (G.pendingRetreats.length > 0) {
+    const pr = G.pendingRetreats[0];
+    const prPlayer = G.players[pr.player];
+    if (pr.reason === 'ko' || pr.reason === 'forced') {
+      turnText = `Turn ${G.turn} — ${prPlayer.name} must choose new Active`;
+    }
   } else if (isOnline && !isMyTurn()) {
     turnText += ' (Waiting...)';
   }
@@ -1546,6 +1573,20 @@ function renderActionPanel() {
   let html = '';
   copiedAttacks = [];
 
+  // Helper function to calculate attack cost with all modifiers
+  function calcAttackCost(attacker, attack, thickAromaCost) {
+    let cost = attack.energy;
+    // Quick Claw reduction
+    if (attacker.quickClawActive) cost = Math.max(0, cost - 2);
+    // Choice Scarf reduction
+    const items = (attacker.heldItems && attacker.heldItems.length > 0) ? attacker.heldItems : (attacker.heldItem ? [attacker.heldItem] : []);
+    const scarfReduction = items.indexOf('Choice Scarf') !== -1 ? 1 : 0;
+    if (scarfReduction) cost = Math.max(0, cost - scarfReduction);
+    // Thick Aroma increase
+    cost += thickAromaCost;
+    return { cost, scarfReduction };
+  }
+
   // If enemy card, just show info (no actions)
   if (!isMine) {
     html += '<div style="color:#888;padding:8px;font-size:11px;text-align:center">Enemy Pokémon — info only</div>';
@@ -1557,7 +1598,7 @@ function renderActionPanel() {
   // Check if opponent's Active has Thick Aroma
   let thickAromaCost = 0;
   const them = isOnline ? G.players[isOnline ? (myPlayerNum === 1 ? 2 : 1) : opp(G.currentPlayer)] : op();
-  if (them.active && !isPassiveBlocked()) {
+  if (them.active && !isPassiveBlocked(them.active)) {
     const themData = getPokemonData(them.active.name);
     if (themData.ability && themData.ability.key === 'thickAroma') thickAromaCost = 1;
   }
@@ -1569,17 +1610,11 @@ function renderActionPanel() {
 
     // Attacks
     html += '<div class="ap-section-label">ATTACKS</div>';
-    // Check for Choice Scarf cost reduction
-    const pkItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
-    const hasScarfReduction = pkItems.indexOf('Choice Scarf') !== -1 ? 1 : 0;
     data.attacks.forEach((atk, i) => {
-      let cost = atk.energy;
-      if (pk.quickClawActive) cost = Math.max(0, cost - 2);
-      if (hasScarfReduction) cost = Math.max(0, cost - hasScarfReduction);
-      cost += thickAromaCost;
-      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked()) && pk.cantUseAttack !== atk.name;
+      const { cost, scarfReduction } = calcAttackCost(pk, atk, thickAromaCost);
+      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked(pk)) && pk.cantUseAttack !== atk.name;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-      const costLabel = (thickAromaCost > 0 || hasScarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
+      const costLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
         <span class="atk-name">${atk.name}${dmgLabel}</span>
         <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
@@ -1597,15 +1632,16 @@ function renderActionPanel() {
     });
 
     // Mew Versatility - show bench allies' attacks
-    if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked()) {
+    if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked(pk)) {
       me.bench.forEach(benchPk => {
         const bd = getPokemonData(benchPk.name);
         bd.attacks.forEach((atk, atkIdx) => {
           const idx = copiedAttacks.length;
           copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
-          const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
+          const { cost, scarfReduction } = calcAttackCost(pk, atk, thickAromaCost);
+          const canUse = pk.energy >= cost && !pk.status.includes('sleep');
           const cdmg = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-          const cCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+          const cCostLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
           html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
             <span class="atk-name">${atk.name}${cdmg}</span>
             <span class="atk-detail">${cCostLabel} | from ${benchPk.name}</span>
@@ -1628,9 +1664,10 @@ function renderActionPanel() {
       oppData.attacks.forEach((atk, atkIdx) => {
         const idx = copiedAttacks.length;
         copiedAttacks.push({ attack: atk, types: oppData.types, source: op().active.name, attackIndex: atkIdx });
-        const canUse = pk.energy >= (atk.energy + thickAromaCost) && !pk.status.includes('sleep');
+        const { cost, scarfReduction } = calcAttackCost(pk, atk, thickAromaCost);
+        const canUse = pk.energy >= cost && !pk.status.includes('sleep');
         const cdmg2 = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-        const dCostLabel = thickAromaCost > 0 ? `${atk.energy}+${thickAromaCost}⚡` : `${atk.energy}⚡`;
+        const dCostLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
         html += `<button class="ap-btn ap-btn-attack" onclick="actionCopiedAttack(${idx}, false)" ${canUse?'':'disabled'} style="border-color:rgba(168,85,247,0.3)">
           <span class="atk-name">${atk.name}${cdmg2}</span>
           <span class="atk-detail">${dCostLabel} | from ${op().active.name}</span>
@@ -1667,7 +1704,7 @@ function renderActionPanel() {
     // Energy grant for this pokemon
     html += '<div class="ap-section-label">ENERGY</div>';
     const myPN = isOnline ? myPlayerNum : G.currentPlayer;
-    const isSlowStart = getPokemonData(pk.name).ability?.key === 'slowStart' && !isPassiveBlocked();
+    const isSlowStart = getPokemonData(pk.name).ability?.key === 'slowStart' && !isPassiveBlocked(pk);
     const cost = isSlowStart ? 2 : 1;
     const canGrant = me.mana >= cost && pk.energy < 5;
     html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${myPN}].active)" ${canGrant?'':'disabled'}>
@@ -1705,7 +1742,7 @@ function renderActionPanel() {
     // Energy grant
     html += '<div class="ap-section-label">ENERGY</div>';
     const myPN = isOnline ? myPlayerNum : G.currentPlayer;
-    const isSlowStart = data.ability?.key === 'slowStart' && !isPassiveBlocked();
+    const isSlowStart = data.ability?.key === 'slowStart' && !isPassiveBlocked(selPk);
     const cost = isSlowStart ? 2 : 1;
     const canGrant = me.mana >= cost && selPk.energy < 5;
     html += `<button class="ap-btn ap-btn-energy" onclick="actionGrantEnergy(G.players[${myPN}].bench[${bIdx}])" ${canGrant?'':'disabled'}>
@@ -1741,16 +1778,39 @@ function renderActionPanel() {
       });
     }
 
-    // Show attacks (info-only, can't use from bench)
+    // Show attacks (Dimension Door allows attacking from bench)
+    const hasDimensionDoor = data.ability && data.ability.key === 'dimensionDoor' && !isPassiveBlocked(selPk);
     if (data.attacks.length > 0) {
-      html += '<div class="ap-section-label" style="opacity:0.5">ATTACKS (must be Active)</div>';
-      data.attacks.forEach(atk => {
-        const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
-        html += `<div class="ap-btn ap-btn-attack" style="opacity:0.35;cursor:default">
-          <span class="atk-name">${atk.name}${dmgLabel}</span>
-          <span class="atk-detail">${atk.energy}⚡${atk.desc ? ' | ' + atk.desc : ''}</span>
-        </div>`;
-      });
+      if (hasDimensionDoor) {
+        html += '<div class="ap-section-label">ATTACKS (Dimension Door)</div>';
+        data.attacks.forEach((atk, i) => {
+          const { cost, scarfReduction } = calcAttackCost(selPk, atk, thickAromaCost);
+          const canUse = selPk.energy >= cost && !selPk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && selPk.damage >= 120 && !isPassiveBlocked(selPk)) && selPk.cantUseAttack !== atk.name;
+          const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+          const costLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
+          html += `<button class="ap-btn ap-btn-attack" onclick="actionBenchAttack(${bIdx}, ${i}, false)" ${canUse?'':'disabled'}>
+            <span class="atk-name">${atk.name}${dmgLabel}</span>
+            <span class="atk-detail">${costLabel}${atk.desc ? ' | ' + atk.desc : ''}</span>
+          </button>`;
+
+          const opt = getOptBoostMeta(atk);
+          if (opt) {
+            html += `<button class="ap-btn ap-btn-attack" onclick="actionBenchAttack(${bIdx}, ${i}, true)" ${canUse?'':'disabled'} style="border-color:rgba(251,191,36,0.45)">
+              <span class="atk-name">${atk.name} ★ Boost | ${atk.baseDmg + opt.extraDmg} dmg</span>
+              <span class="atk-detail">${costLabel} (−${opt.energyCost}⚡) | ${atk.desc || ''}</span>
+            </button>`;
+          }
+        });
+      } else {
+        html += '<div class="ap-section-label" style="opacity:0.5">ATTACKS (must be Active)</div>';
+        data.attacks.forEach(atk => {
+          const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
+          html += `<div class="ap-btn ap-btn-attack" style="opacity:0.35;cursor:default">
+            <span class="atk-name">${atk.name}${dmgLabel}</span>
+            <span class="atk-detail">${atk.energy}⚡${atk.desc ? ' | ' + atk.desc : ''}</span>
+          </div>`;
+        });
+      }
     }
   }
 

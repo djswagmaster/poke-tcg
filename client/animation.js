@@ -145,7 +145,9 @@ var AnimQueue = (function() {
         ctx.renderBattle();
         ctx.focusOnActives();
         await ctx.delay(250);
-        var atkSel = ctx.getPokemonSelector(evt.player || (window.G ? window.G.currentPlayer : 1), -1);
+        // Handle bench attacks (Giratina's Dimension Door)
+        var atkBenchIdx = evt.fromBench ? evt.benchIdx : -1;
+        var atkSel = ctx.getPokemonSelector(evt.player || (window.G ? window.G.currentPlayer : 1), atkBenchIdx);
         ctx.animateEl(atkSel, 'attacking', 500);
         await ctx.delay(500);
         break;

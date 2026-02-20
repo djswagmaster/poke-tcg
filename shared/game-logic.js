@@ -42,8 +42,8 @@ function addLog(G, text, cls) {
   G.events.push({ type: 'log', text: text, cls: cls });
 }
 
-function isPassiveBlocked(G) {
-  return DamagePipeline.isPassiveBlocked(G);
+function isPassiveBlocked(G, pokemon) {
+  return DamagePipeline.isPassiveBlocked(G, pokemon);
 }
 
 // Check if a player's OPPONENT has a specific passive ability in play
@@ -53,7 +53,7 @@ function _oppHasPassive(G, playerNum, abilityKey) {
   for (var i = 0; i < allPokemon.length; i++) {
     if (allPokemon[i].hp <= 0) continue;
     var d = PokemonDB.getPokemonData(allPokemon[i].name);
-    if (d && d.ability && d.ability.key === abilityKey && d.ability.type === 'passive') return true;
+    if (d && d.ability && d.ability.key === abilityKey && d.ability.type === 'passive' && !isPassiveBlocked(G, allPokemon[i])) return true;
   }
   return false;
 }
@@ -72,7 +72,7 @@ function triggerHealingScarf(G, pk, healAmount) {
 // Blockade: opponent's ability prevents retreat (unless holder has Protect Goggles)
 function isBlockedByBlockade(G, retreater) {
   var oppActive = G.players[opp(G.currentPlayer)].active;
-  if (oppActive && !isPassiveBlocked(G)) {
+  if (oppActive && !isPassiveBlocked(G, oppActive)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
     if (oppData.ability && oppData.ability.key === 'blockade' && retreater.heldItem !== 'Protect Goggles') {
       addLog(G, 'Blockade prevents retreat!', 'effect');
@@ -166,17 +166,14 @@ function runOnPlayAbility(G, playerNum, pk) {
 
 function applyBloomingGardenAura(G) {
   _deps();
-  var passivesBlocked = isPassiveBlocked(G);
   [1, 2].forEach(function(playerNum) {
     var p = G.players[playerNum];
     var inPlay = [p.active].concat(p.bench).filter(Boolean);
     var bloomingCount = 0;
-    if (!passivesBlocked) {
-      inPlay.forEach(function(pk) {
-        var d = PokemonDB.getPokemonData(pk.name);
-        if (d && d.ability && d.ability.key === 'bloomingGarden') bloomingCount++;
-      });
-    }
+    inPlay.forEach(function(pk) {
+      var d = PokemonDB.getPokemonData(pk.name);
+      if (d && d.ability && d.ability.key === 'bloomingGarden' && !isPassiveBlocked(G, pk)) bloomingCount++;
+    });
     var bonus = 20 * bloomingCount;
     inPlay.forEach(function(pk) {
       if (!pk.baseMaxHp) pk.baseMaxHp = pk.maxHp;
@@ -228,7 +225,7 @@ function startTurn(G) {
   // Passive start-of-turn: Berry Juice Sip (Shuckle)
   allPokemon.forEach(function(pk) {
     var d = PokemonDB.getPokemonData(pk.name);
-    if (d.ability && d.ability.key === 'berryJuice' && pk.damage > 0 && !isPassiveBlocked(G)) {
+    if (d.ability && d.ability.key === 'berryJuice' && pk.damage > 0 && !isPassiveBlocked(G, pk)) {
       pk.damage = Math.max(0, pk.damage - 20);
       pk.hp = pk.maxHp - pk.damage;
       addLog(G, 'Berry Juice heals ' + pk.name + ' 20', 'heal');
@@ -261,13 +258,30 @@ function endTurn(G) {
   var allMine = [p.active].concat(p.bench).filter(Boolean);
   allMine.forEach(function(pk) {
     var d = PokemonDB.getPokemonData(pk.name);
-    if (d.ability && d.ability.key === 'aquaRing' && pk === p.active && !isPassiveBlocked(G)) {
+    if (d.ability && d.ability.key === 'aquaRing' && pk === p.active && !isPassiveBlocked(G, pk)) {
       var target = op(G).active;
       if (target && target.energy > 0 && target.heldItem !== 'Protect Goggles') {
         target.energy = Math.max(0, target.energy - 1);
         addLog(G, 'Freezing Winds strips 1 energy from ' + target.name, 'effect');
         G.events.push({ type: 'ability_effect', ability: 'aquaRing', target: target.name, effect: 'stripEnergy' });
       }
+    }
+  });
+
+  // Tyranitar Sand Stream (deal 10 to all opp Pokemon at end of owner's turn)
+  allMine.forEach(function(pk) {
+    var d = PokemonDB.getPokemonData(pk.name);
+    if (d.ability && d.ability.key === 'sandStream' && pk === p.active && !isPassiveBlocked(G, pk)) {
+      var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
+      oppAll.forEach(function(oppPk) {
+        if (oppPk.hp > 0) {
+          var sandAtk = { baseDmg: 10, fx: '' };
+          var sandResult = DamagePipeline.dealAttackDamage(G, pk, oppPk, sandAtk, ['Normal'], opp(G.currentPlayer));
+          G.events = G.events.concat(sandResult.events);
+        }
+      });
+      addLog(G, 'Sand Stream deals 10 to all opponent Pokemon!', 'effect');
+      G.events.push({ type: 'ability_effect', ability: 'sandStream', pokemon: pk.name });
     }
   });
 
@@ -412,7 +426,7 @@ function doGrantEnergy(G, targetSlot, benchIdx) {
   var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
   oppAll.forEach(function(pk) {
     var d = PokemonDB.getPokemonData(pk.name);
-    if (d.ability && d.ability.key === 'bitingWhirlpool' && !isPassiveBlocked(G)) {
+    if (d.ability && d.ability.key === 'bitingWhirlpool' && !isPassiveBlocked(G, pk)) {
       var dmgResult = DamagePipeline.applyDamage(G, target, 10, G.currentPlayer);
       addLog(G, 'Biting Whirlpool deals 10 to ' + target.name, 'effect');
       G.events.push({ type: 'ability_damage', ability: 'bitingWhirlpool', target: target.name, amount: 10, owner: G.currentPlayer });
@@ -435,7 +449,7 @@ function doAttack(G, attackIndex, actionOpts) {
   var data = PokemonDB.getPokemonData(attacker.name);
 
   // Defeatist check
-  if (data.ability && data.ability.key === 'defeatist' && attacker.damage >= 120 && !isPassiveBlocked(G)) {
+  if (data.ability && data.ability.key === 'defeatist' && attacker.damage >= 120 && !isPassiveBlocked(G, attacker)) {
     addLog(G, attacker.name + " can't attack (Defeatist)!", 'info');
     return false;
   }
@@ -454,7 +468,7 @@ function doAttack(G, attackIndex, actionOpts) {
   var atkCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
   if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
   var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
+  if (oppActive && !isPassiveBlocked(G, oppActive)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
     if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
   }
@@ -490,6 +504,75 @@ function doAttack(G, attackIndex, actionOpts) {
   return true;
 }
 
+// --- Bench Attack (Giratina's Dimension Door) ---
+function doBenchAttack(G, benchIdx, attackIndex, actionOpts) {
+  _deps();
+  var p = cp(G);
+  var attacker = p.bench[benchIdx];
+  if (!attacker) return false;
+  var data = PokemonDB.getPokemonData(attacker.name);
+
+  // Check if Pokemon has Dimension Door ability
+  if (!data.ability || data.ability.key !== 'dimensionDoor' || isPassiveBlocked(G, attacker)) {
+    addLog(G, attacker.name + " can't attack from the bench!", 'info');
+    return false;
+  }
+
+  // Defeatist check
+  if (data.ability && data.ability.key === 'defeatist' && attacker.damage >= 120 && !isPassiveBlocked(G, attacker)) {
+    addLog(G, attacker.name + " can't attack (Defeatist)!", 'info');
+    return false;
+  }
+
+  // Status check (sleep / confusion)
+  var statusResult = checkStatusBeforeAttack(G, attacker);
+  if (statusResult === 'blocked') return false;
+  if (statusResult === 'ended') return true;
+
+  var attack = data.attacks[attackIndex];
+  if (!attack) return false;
+
+  // Energy cost + item cost mods + Thick Aroma
+  var energyCost = attack.energy;
+  if (attacker.quickClawActive) energyCost = Math.max(0, energyCost - 2);
+  var atkCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
+  if (atkCostHook && atkCostHook.costReduction) energyCost = Math.max(0, energyCost - atkCostHook.costReduction);
+  var oppActive = op(G).active;
+  if (oppActive && !isPassiveBlocked(G, oppActive)) {
+    var oppData = PokemonDB.getPokemonData(oppActive.name);
+    if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
+  }
+  if (attacker.energy < energyCost) return false;
+
+  // Locked attack
+  if (attacker.cantUseAttack === attack.name && (!attacker.cantUseAttackUntilTurn || attacker.cantUseAttackUntilTurn >= G.turn)) {
+    addLog(G, "Can't use " + attack.name + ' this turn!', 'info');
+    return false;
+  }
+
+  // Consume Quick Claw
+  if (attacker.quickClawActive) {
+    attacker.quickClawActive = false;
+    attacker.heldItemUsed = true;
+    attacker.heldItem = null;
+    addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
+    G.events.push({ type: 'item_proc', item: 'Quick Claw', pokemon: attacker.name, effect: 'costReduction' });
+  }
+
+  var fx = attack.fx || '';
+  var useOptBoost = (actionOpts && actionOpts.useOptBoost) || false;
+
+  addLog(G, attacker.name + ' uses ' + attack.name + ' from the bench!', 'info');
+  G.events.push({ type: 'attack_declare', attacker: attacker.name, attack: attack.name, attackIndex: attackIndex, player: G.currentPlayer, fromBench: true, benchIdx: benchIdx });
+
+  // Guard id for one-shot attacker item hooks
+  G.attackSeq = (G.attackSeq || 0) + 1;
+
+  // Execute full attack
+  executeAttack(G, attacker, attack, data.types, fx, p, useOptBoost, G.attackSeq);
+  return true;
+}
+
 // --- Copied Attack (Mew / Ditto) ---
 function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   _deps();
@@ -514,7 +597,7 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
   var copiedCostHook = DamagePipeline.runItemHookAll('onAttackCost', attacker, { holder: attacker, attack: attack, G: G });
   if (copiedCostHook && copiedCostHook.costReduction) energyCost = Math.max(0, energyCost - copiedCostHook.costReduction);
   var oppActive = op(G).active;
-  if (oppActive && !isPassiveBlocked(G)) {
+  if (oppActive && !isPassiveBlocked(G, oppActive)) {
     var oppData = PokemonDB.getPokemonData(oppActive.name);
     if (oppData.ability && oppData.ability.key === 'thickAroma') energyCost += 1;
   }
@@ -587,7 +670,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   if (!defender) return;
 
   // Main damage
-  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
+  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|scaleBenchAll|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
   if (needsDmg) {
     var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, effectiveAttack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
     G.events = G.events.concat(damageResult.events);
@@ -621,7 +704,7 @@ function finalizeAttack(G, attacker) {
   if (attacker) attacker.attackedThisTurn = true;
 
   // Swift Strikes: gain +1 energy whenever this Pokemon attacks
-  if (attacker && attacker.hp > 0 && !isPassiveBlocked(G)) {
+  if (attacker && attacker.hp > 0 && !isPassiveBlocked(G, attacker)) {
     var atkData = PokemonDB.getPokemonData(attacker.name);
     if (atkData && atkData.ability && atkData.ability.key === 'swiftStrikes') {
       var beforeE = attacker.energy;
@@ -631,6 +714,16 @@ function finalizeAttack(G, attacker) {
         addLog(G, 'Swift Strikes: ' + attacker.name + ' gained 1 energy!', 'effect');
         G.events.push({ type: 'energyGain', pokemon: attacker.name, amount: 1, source: 'swiftStrikes', owner: G.currentPlayer });
         triggerHealingScarf(G, attacker);
+      }
+    }
+    // Time Dilation: lose 2 energy whenever this Pokemon attacks
+    if (atkData && atkData.ability && atkData.ability.key === 'timeDilation') {
+      var beforeE = attacker.energy;
+      attacker.energy = Math.max(0, attacker.energy - 2);
+      var lost = beforeE - attacker.energy;
+      if (lost > 0) {
+        addLog(G, 'Time Dilation: ' + attacker.name + ' lost ' + lost + ' energy!', 'effect');
+        G.events.push({ type: 'selfEnergyLoss', pokemon: attacker.name, amount: lost, source: 'timeDilation', owner: G.currentPlayer });
       }
     }
   }
@@ -799,6 +892,32 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
       if (multiFxResult.signal === 'pendingRetreat') return true;
       if (multiFxResult.signal === 'pendingTarget') {
         G.targeting = { type: multiFxResult.targetingInfo.type, validTargets: multiFxResult.targetingInfo.validTargets, attackInfo: multiFxResult.targetingInfo };
+        return true;
+      }
+    }
+
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
+  // Conditional bench damage (e.g. Raikou's Charge Lance)
+  if (info.type === 'condBench') {
+    if (targetPlayer === G.currentPlayer || targetBenchIdx < 0) return false;
+    var condAtk = { baseDmg: info.baseDmg, fx: '' };
+    var condResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, condAtk, info.attackerTypes, targetPlayer, {
+      attackSeq: info.attackSeq
+    });
+    G.events = G.events.concat(condResult.events);
+    addLog(G, info.baseDmg + ' to ' + targetPk.name + ' (Charge Lance)', 'damage');
+
+    var condFx = (info.attack && info.attack.fx) || '';
+    var condRemainFx = condFx.replace(/condBench:\d+:\d+/, '').trim();
+    if (condRemainFx) {
+      var condFxResult = FXHandlers.processAll(G, condRemainFx, info.attacker, targetPk, info.attack, false);
+      G.events = G.events.concat(condFxResult.events);
+      if (condFxResult.signal === 'pendingRetreat') return true;
+      if (condFxResult.signal === 'pendingTarget') {
+        G.targeting = { type: condFxResult.targetingInfo.type, validTargets: condFxResult.targetingInfo.validTargets, attackInfo: condFxResult.targetingInfo };
         return true;
       }
     }
@@ -1062,7 +1181,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
   var data = PokemonDB.getPokemonData(pk.name);
   if (!data.ability || data.ability.type !== 'active') return false;
   if (abilityKey && data.ability.key !== abilityKey) return false;
-  if (isPassiveBlocked(G)) { addLog(G, 'Neutralizing Gas blocks abilities!', 'info'); return false; }
+  if (isPassiveBlocked(G, pk)) { addLog(G, 'Neutralizing Gas blocks abilities!', 'info'); return false; }
 
   var key = data.ability.key;
   var fromBench = !!(pk !== p.active);
@@ -1296,14 +1415,24 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'retreat_pending', player: G.currentPlayer, free: true });
       break;
 
-    case 'bloodthirsty': // Lycanroc: 1 mana, force opp switch
+    case 'bloodthirsty': // Lycanroc: 1 mana, force opp switch (you choose)
       if (p.mana < 1) return false;
       if (op(G).bench.length === 0) return false;
       p.mana--;
-      G.pendingRetreats.push({ player: opp(G.currentPlayer), reason: 'forced' });
       p.usedAbilities[key] = true;
-      addLog(G, 'Bloodthirsty: opponent must switch!', 'effect');
-      G.events.push({ type: 'ability_effect', ability: key, target: opp(G.currentPlayer) });
+      
+      // Set up targeting so the current player chooses which opponent bench pokemon becomes active
+      var btTargets = [];
+      for (var bti = 0; bti < op(G).bench.length; bti++) {
+        btTargets.push({ player: opp(G.currentPlayer), idx: bti, pk: op(G).bench[bti] });
+      }
+      G.targeting = {
+        type: 'bloodthirsty',
+        validTargets: btTargets,
+        attackInfo: { sourceType: 'ability', type: 'bloodthirsty', attacker: pk }
+      };
+      addLog(G, 'Bloodthirsty: choose opponent\'s new Active!', 'effect');
+      G.events.push({ type: 'ability_targeting', ability: key });
       break;
 
     case 'electroCharge': // Jolteon: active +1 energy (1/turn)
@@ -1430,7 +1559,7 @@ function getCopiedAttacks(G) {
   var attacks = [];
 
   // Mew Versatility
-  if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked(G)) {
+  if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked(G, pk)) {
     p.bench.forEach(function(benchPk) {
       var bd = PokemonDB.getPokemonData(benchPk.name);
       bd.attacks.forEach(function(atk, i) {
@@ -1510,6 +1639,28 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
       addLog(G, 'Leaf Boost: ' + targetPk.name + ' gained 1 energy. Turn ends.', 'effect');
       G.events.push({ type: 'ability_effect', ability: 'leafBoost', target: targetPk.name, amount: 1, benchIdx: targetBenchIdx });
       endTurn(G);
+      break;
+
+    case 'bloodthirsty':
+      // Force opponent to switch to the chosen bench pokemon
+      if (targetPlayer === G.currentPlayer) return false; // Must target opponent
+      if (targetBenchIdx < 0) return false; // Must target bench
+      var oppPlayer = G.players[targetPlayer];
+      if (!oppPlayer.active) return false;
+      
+      // Swap: chosen bench pokemon becomes active, old active goes to bench
+      var oldActive = oppPlayer.active;
+      oppPlayer.active = targetPk;
+      oppPlayer.bench[targetBenchIdx] = oldActive;
+      
+      addLog(G, 'Bloodthirsty: ' + targetPk.name + ' forced to Active!', 'effect');
+      G.events.push({ 
+        type: 'retreat_complete', 
+        player: targetPlayer, 
+        newActive: targetPk.name, 
+        oldActive: oldActive.name,
+        reason: 'bloodthirsty'
+      });
       break;
   }
 
@@ -1702,6 +1853,7 @@ function processAction(G, playerNum, action) {
 
   switch (action.type) {
     case 'attack': return finish(doAttack(G, action.attackIndex, action));
+    case 'benchAttack': return finish(doBenchAttack(G, action.benchIdx, action.attackIndex, action));
     case 'copiedAttack': return finish(doCopiedAttack(G, action.sourceName, action.attackIndex, action));
     case 'retreat': return finish(doRetreat(G));
     case 'quickRetreat': return finish(doQuickRetreat(G));
@@ -1762,6 +1914,7 @@ exports.processSetupChoice = processSetupChoice;
 exports.filterStateForPlayer = filterStateForPlayer;
 exports.getCopiedAttacks = getCopiedAttacks;
 exports.doAbilityTarget = doAbilityTarget;
+exports.doBenchAttack = doBenchAttack;
 exports.addLog = addLog;
 exports.isPassiveBlocked = isPassiveBlocked;
 exports.opp = opp;
