@@ -275,9 +275,12 @@ function endTurn(G) {
       var oppAll = [op(G).active].concat(op(G).bench).filter(Boolean);
       oppAll.forEach(function(oppPk) {
         if (oppPk.hp > 0) {
-          var sandAtk = { baseDmg: 10, fx: '' };
-          var sandResult = DamagePipeline.dealAttackDamage(G, pk, oppPk, sandAtk, ['Normal'], opp(G.currentPlayer));
-          G.events = G.events.concat(sandResult.events);
+          var sandResult = DamagePipeline.applyDamage(G, oppPk, 10, opp(G.currentPlayer));
+          G.events.push({ type: 'ability_damage', ability: 'sandStream', target: oppPk.name, amount: 10, owner: opp(G.currentPlayer) });
+          if (sandResult.ko) {
+            var koEvents = DamagePipeline.handleKO(G, oppPk, opp(G.currentPlayer));
+            G.events = G.events.concat(koEvents);
+          }
         }
       });
       addLog(G, 'Sand Stream deals 10 to all opponent Pokemon!', 'effect');

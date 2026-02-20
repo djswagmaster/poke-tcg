@@ -350,7 +350,7 @@ var POKEMON_DB = [
 
   {name:"Vileplume",types:["Grass","Poison"],cost:4,hp:200,weakness:["Ground"],resistance:["Water"],
     ability:{name:"Poison Fumes",desc:"Poison opp Active (1/turn)",type:"active",key:"poisonFumes"},
-    attacks:[{name:"Sleepy Bloom",energy:4,baseDmg:50,desc:"Sleep",fx:"sleep"}]},
+    attacks:[{name:"Sleepy Bloom",energy:3,baseDmg:50,desc:"Sleep",fx:"sleep"}]},
 
   {name:"Zeraora",types:["Electric"],cost:5,hp:220,weakness:["Ground"],resistance:["Steel"],
     attacks:[{name:"Volt Switch",energy:1,baseDmg:80,desc:"Force self-retreat",fx:"selfRetreat"},
