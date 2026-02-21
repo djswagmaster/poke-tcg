@@ -367,10 +367,12 @@ wss.on('connection', (ws) => {
 
       // Set disconnect timeout (5 minutes)
       setTimeout(() => {
-        if (room.players[playerNum] && !room.players[playerNum].connected) {
+        const currentRoom = rooms.get(code);
+        if (!currentRoom) return;
+        if (currentRoom.players[playerNum] && !currentRoom.players[playerNum].connected) {
           console.log(`Player ${playerNum} timed out in room ${code}`);
           // Clean up room if both disconnected
-          const allDisconnected = [1, 2].every(n => !room.players[n] || !room.players[n].connected);
+          const allDisconnected = [1, 2].every(n => !currentRoom.players[n] || !currentRoom.players[n].connected);
           if (allDisconnected) {
             rooms.delete(code);
             console.log(`Room ${code} cleaned up (all disconnected)`);

@@ -266,6 +266,10 @@ var POKEMON_DB = [
     attacks:[{name:"Glinting Claw",energy:2,baseDmg:100,desc:"",fx:""},
              {name:"Blue Flare Blaze",energy:4,baseDmg:250,desc:"Lose 2 energy",fx:"selfEnergyLoss:2"}]},
 
+  {name:"Rotom",types:["Electric","Ghost"],cost:3,hp:180,
+    attacks:[{name:"Trick",energy:1,baseDmg:0,desc:"Both Active Pokemon swap Held Items",fx:"trick"},
+             {name:"Poltergeist",energy:3,baseDmg:100,desc:"Does nothing if defender has no Held Item",fx:"poltergeist"}]},
+
   {name:"Rhydon",types:["Ground","Rock"],cost:4,hp:250,weakness:["Grass","Water"],resistance:["Electric","Flying"],
     attacks:[{name:"Horn Drill",energy:2,baseDmg:70,desc:"",fx:""},
              {name:"Collateral Crush",energy:4,baseDmg:140,desc:"50 to your bench",fx:"selfBenchDmg:50"}]},

@@ -1644,10 +1644,10 @@ function renderActionPanel() {
 
   // Check if opponent's Active has Thick Aroma
   let thickAromaCost = 0;
-  const them = isOnline ? G.players[isOnline ? (myPlayerNum === 1 ? 2 : 1) : opp(G.currentPlayer)] : op();
+  const them = isOnline ? G.players[myPlayerNum === 1 ? 2 : 1] : op();
   if (them.active && !isPassiveBlocked(them.active)) {
     const themData = getPokemonData(them.active.name);
-    if (themData.ability && themData.ability.key === 'thickAroma') thickAromaCost = 1;
+    if (themData && themData.ability && themData.ability.key === 'thickAroma') thickAromaCost = 1;
   }
 
   // === MY ACTIVE POKEMON SELECTED ===
@@ -1682,6 +1682,7 @@ function renderActionPanel() {
     if (data.ability && data.ability.key === 'versatility' && !isPassiveBlocked(pk)) {
       me.bench.forEach(benchPk => {
         const bd = getPokemonData(benchPk.name);
+        if (!bd) return;
         bd.attacks.forEach((atk, atkIdx) => {
           const idx = copiedAttacks.length;
           copiedAttacks.push({ attack: atk, types: bd.types, source: benchPk.name, attackIndex: atkIdx });
@@ -1707,6 +1708,7 @@ function renderActionPanel() {
     // Ditto Improvise
     if (pk.improviseActive && op().active) {
       const oppData = getPokemonData(op().active.name);
+      if (!oppData) return;
       html += '<div class="ap-section-label" style="color:#c4b5fd">COPIED ATTACKS</div>';
       oppData.attacks.forEach((atk, atkIdx) => {
         const idx = copiedAttacks.length;
@@ -2198,13 +2200,12 @@ function handleGameState(state, events) {
       G.log = state.log || [];
       G.animating = true;
       
-      // Safety: ensure animating gets cleared even if something goes wrong
-      const clearAnimating = () => {
-        G.animating = false;
-      };
-      
+      let drainHandled = false;
+
       AnimQueue.replayEvents(events, animCtx);
       AnimQueue.setOnDrain(() => {
+        if (drainHandled) return;
+        drainHandled = true;
         try {
           applyServerState(state);
           G.animating = false;
@@ -2216,10 +2217,11 @@ function handleGameState(state, events) {
           renderBattle();
         }
       });
-      
+
       // Fallback: if onDrain doesn't fire within 5 seconds, force clear
       setTimeout(() => {
-        if (G.animating) {
+        if (!drainHandled && G.animating) {
+          drainHandled = true;
           console.warn('[handleGameState] onDrain timeout, force clearing animating');
           G.animating = false;
           applyServerState(state);
