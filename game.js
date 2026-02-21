@@ -49,6 +49,14 @@ const G = {
 // apply immediately instead of waiting until final-state restore.
 if (typeof window !== 'undefined') window.G = G;
 
+// Debug function to force-clear animation lock if it gets stuck
+window.forceUnlock = function() {
+  console.warn('[DEBUG] Force-clearing G.animating');
+  G.animating = false;
+  AnimQueue.clear();
+  renderBattle();
+};
+
 // Track previous HP percentages for smooth bar transitions
 const prevHpPct = {};
 
@@ -430,7 +438,10 @@ const animCtx = {
  * Returns a Promise that resolves when all animations are done.
  */
 function dispatchAction(action) {
-  if (G.animating) return;
+  if (G.animating) {
+    console.warn('[dispatchAction] Blocked: already animating');
+    return;
+  }
   G.animating = true;
   G.events = [];
   const playerNum = action._playerNum || G.currentPlayer;
@@ -451,8 +462,10 @@ function dispatchAction(action) {
   G.events = [];
 
   if (!result && events.length === 0) {
+    console.warn('[dispatchAction] Action failed with no events:', action.type);
     window._replayPov = null;
     G.animating = false;
+    renderBattle(); // Re-render to show current state
     return;
   }
 
@@ -833,6 +846,40 @@ function useAbility(key) {
     : -1;
   if (isOnline) { sendAction({ actionType: 'useAbility', key, sourceBenchIdx }); return; }
   dispatchAction({ type: 'useAbility', key, sourceBenchIdx });
+}
+
+function useTechnoClaws() {
+  if (G.animating) return;
+  // Set up targeting for Techno Claws
+  const targets = [];
+  for (let pNum = 1; pNum <= 2; pNum++) {
+    const side = G.players[pNum];
+    if (side.active && side.active.hp > 0) {
+      targets.push({ player: pNum, idx: -1, pk: side.active });
+    }
+    side.bench.forEach((bpk, bi) => {
+      if (bpk && bpk.hp > 0) {
+        targets.push({ player: pNum, idx: bi, pk: bpk });
+      }
+    });
+  }
+  if (targets.length === 0) return;
+  
+  G.targeting = {
+    type: 'technoClaws',
+    validTargets: targets,
+    attackInfo: { sourceType: 'ability', type: 'technoClaws' }
+  };
+  renderBattle();
+}
+
+function useLifeDew(benchIdx) {
+  if (G.animating) return;
+  if (isOnline) {
+    sendAction({ actionType: 'lifeDew', benchIdx });
+    return;
+  }
+  dispatchAction({ type: 'lifeDew', benchIdx });
 }
 
 
@@ -1612,7 +1659,7 @@ function renderActionPanel() {
     html += '<div class="ap-section-label">ATTACKS</div>';
     data.attacks.forEach((atk, i) => {
       const { cost, scarfReduction } = calcAttackCost(pk, atk, thickAromaCost);
-      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked(pk)) && pk.cantUseAttack !== atk.name;
+      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked(pk)) && pk.cantUseAttack !== atk.name && !G.animating;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
       const costLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
@@ -1686,7 +1733,7 @@ function renderActionPanel() {
     if (data.ability) {
       if (data.ability.type === 'active') {
         const used = me.usedAbilities[data.ability.key];
-        const canUse = canUseAbilityFromSelection(data.ability.key, used, -1);
+        const canUse = canUseAbilityFromSelection(data.ability.key, used, -1) && !G.animating;
         html += '<div class="ap-section-label">ABILITY</div>';
         html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
           <span class="atk-name">${data.ability.name}</span>
@@ -1699,6 +1746,25 @@ function renderActionPanel() {
           <span class="atk-detail" style="color:#a5b4fc">${data.ability.desc} [Passive]</span>
         </div>`;
       }
+    }
+
+    // Activated held items (Techno Claws, Life Dew)
+    const pkAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
+    if (pkAllItems.indexOf('Techno Claws') !== -1 && !pk.technoClawsUsed) {
+      const canUse = me.mana >= 1 && !G.animating;
+      html += '<div class="ap-section-label">ITEM ABILITY</div>';
+      html += `<button class="ap-btn ap-btn-ability" onclick="useTechnoClaws()" ${canUse?'':'disabled'}>
+        <span class="atk-name">Techno Claws</span>
+        <span class="atk-detail">1 mana: 40 dmg to any Pokemon</span>
+      </button>`;
+    }
+    if (pkAllItems.indexOf('Life Dew') !== -1 && !pk.lifeDewUsed && pk.damage > 0) {
+      const canUse = me.mana >= 1 && !G.animating;
+      html += '<div class="ap-section-label">ITEM ABILITY</div>';
+      html += `<button class="ap-btn ap-btn-ability" onclick="useLifeDew(-1)" ${canUse?'':'disabled'}>
+        <span class="atk-name">Life Dew</span>
+        <span class="atk-detail">1 mana: heal 50 HP</span>
+      </button>`;
     }
 
     // Energy grant for this pokemon
@@ -1714,7 +1780,6 @@ function renderActionPanel() {
 
     // Retreat
     html += '<div class="ap-section-label">MOVEMENT</div>';
-    const pkAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
     const qrCost = pkAllItems.indexOf('Float Stone') !== -1 ? 1 : 2;
     html += `<button class="ap-btn ap-btn-retreat" onclick="actionQuickRetreat()" ${me.bench.length > 0 && pk.energy >= qrCost ? '' : 'disabled'}>
       <span class="atk-name">Quick Retreat</span><span class="atk-detail">${qrCost} energy, don't end turn</span>
@@ -1753,7 +1818,7 @@ function renderActionPanel() {
     // Ability (if this bench pokemon has an active ability)
     if (data.ability && data.ability.type === 'active') {
       const used = me.usedAbilities[data.ability.key];
-      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel.benchIdx);
+      const canUse = canUseAbilityFromSelection(data.ability.key, used, sel.benchIdx) && !G.animating;
       html += '<div class="ap-section-label">ABILITY</div>';
       html += `<button class="ap-btn ap-btn-ability" onclick="useAbility('${data.ability.key}')" ${canUse?'':'disabled'}>
         <span class="atk-name">${data.ability.name}</span>
@@ -1765,6 +1830,17 @@ function renderActionPanel() {
         <span class="atk-name">${data.ability.name}</span>
         <span class="atk-detail" style="color:#a5b4fc">${data.ability.desc} [Passive]</span>
       </div>`;
+    }
+
+    // Activated held items for bench Pokemon (Life Dew)
+    const benchPkAllItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
+    if (benchPkAllItems.indexOf('Life Dew') !== -1 && !selPk.lifeDewUsed && selPk.damage > 0) {
+      const canUse = me.mana >= 1 && !G.animating;
+      html += '<div class="ap-section-label">ITEM ABILITY</div>';
+      html += `<button class="ap-btn ap-btn-ability" onclick="useLifeDew(${bIdx})" ${canUse?'':'disabled'}>
+        <span class="atk-name">Life Dew</span>
+        <span class="atk-detail">1 mana: heal 50 HP</span>
+      </button>`;
     }
 
     // Held item discard
@@ -1826,7 +1902,8 @@ function renderEndTurnButton(me) {
       <span class="atk-name">End Turn</span>
     </button>`;
   } else {
-    html += `<button class="ap-btn ap-btn-end" onclick="if(!G.animating){dispatchAction({type:'endTurn'})}">
+    const canEnd = !G.animating && !G.pendingRetreats.length && !G.targeting;
+    html += `<button class="ap-btn ap-btn-end" onclick="if(!G.animating){dispatchAction({type:'endTurn'})}" ${canEnd?'':'disabled'}>
       <span class="atk-name">End Turn</span>
     </button>`;
   }

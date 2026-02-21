@@ -221,7 +221,8 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
     // Item-based reduction (hooks: onTakeDamage)
     var defItemResult = runItemHookAll('onTakeDamage', defender, {
       holder: defender,
-      holderCost: PokemonDB.getPokemonData(defender.name).cost
+      holderCost: PokemonDB.getPokemonData(defender.name).cost,
+      G: G
     });
     if (defItemResult && defItemResult.reduction) reduction += defItemResult.reduction;
 
@@ -488,6 +489,11 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
   var reactiveItems = getHeldItems(defender);
   if (reactiveItems.length === 0) return events;
 
+  // Reactive items target the attacker's owner's ACTIVE Pokemon, not the attacker itself
+  // (important for bench attacks like Giratina's Dimension Door)
+  var attackerPlayer = G.players[attackerOwner];
+  var reactiveTarget = attackerPlayer.active;
+
   for (var ri = 0; ri < reactiveItems.length; ri++) {
     var riName = reactiveItems[ri];
     var wpResult = ItemDB.runItemHook('onDamagedByAttack', riName, {
@@ -507,22 +513,26 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
         for (var i = 0; i < wpResult.events.length; i++) {
           var evt = wpResult.events[i];
           if (evt.type === 'damage' && evt.target) {
-            var dmgRes = applyDamage(G, evt.target, evt.amount, attackerOwner);
+            // Use reactiveTarget (attacker's active) instead of evt.target (the attacker)
+            if (!reactiveTarget || reactiveTarget.hp <= 0) continue;
+            var dmgRes = applyDamage(G, reactiveTarget, evt.amount, attackerOwner);
             events.push({
-              type: 'reactiveDamage', source: evt.source, target: evt.target.name,
+              type: 'reactiveDamage', source: evt.source, target: reactiveTarget.name,
               amount: evt.amount, targetOwner: attackerOwner
             });
             events = events.concat(dmgRes.events);
             if (dmgRes.ko) {
-              var koEvents = handleKO(G, evt.target, attackerOwner);
+              var koEvents = handleKO(G, reactiveTarget, attackerOwner);
               events = events.concat(koEvents);
             }
           }
           if (evt.type === 'addStatus' && evt.target) {
-            if (evt.target.status.indexOf(evt.status) === -1) {
-              evt.target.status.push(evt.status);
+            // Use reactiveTarget (attacker's active) instead of evt.target (the attacker)
+            if (!reactiveTarget || reactiveTarget.hp <= 0) continue;
+            if (reactiveTarget.status.indexOf(evt.status) === -1) {
+              reactiveTarget.status.push(evt.status);
               events.push({
-                type: 'statusApplied', pokemon: evt.target.name, status: evt.status, source: evt.source, owner: attackerOwner
+                type: 'statusApplied', pokemon: reactiveTarget.name, status: evt.status, source: evt.source, owner: attackerOwner
               });
             }
           }
@@ -635,6 +645,14 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
           var gained = attacker.energy - beforeEnergy;
           if (gained > 0) {
             events.push({ type: 'energyGain', pokemon: attacker.name, amount: gained, source: atkItems[0], owner: attackerOwner });
+          }
+        }
+        if (atkResult.energyLoss) {
+          var beforeEnergy = attacker.energy;
+          attacker.energy = Math.max(0, attacker.energy - atkResult.energyLoss);
+          var lost = beforeEnergy - attacker.energy;
+          if (lost > 0) {
+            events.push({ type: 'energyLoss', pokemon: attacker.name, amount: lost, source: atkItems[0], owner: attackerOwner });
           }
         }
         if (atkResult.lockAttackName) {

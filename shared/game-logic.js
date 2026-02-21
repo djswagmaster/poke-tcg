@@ -94,7 +94,7 @@ function makePokemon(name, heldItem) {
     else if (data.cost === 2) evioliteBonus = 20;
     else if (data.cost === 3) evioliteBonus = 10;
   }
-  var maxHp = data.hp + (heldItem === 'Health Charm' ? 50 : 0) + evioliteBonus;
+  var maxHp = data.hp + evioliteBonus;
   var energy = heldItem === 'Power Herb' ? 1 : 0;
   var actualItem = heldItem === 'Power Herb' ? null : heldItem;
   return {
@@ -111,9 +111,7 @@ function makePokemon(name, heldItem) {
 // Apply a bonus held item to a Pokemon (used by Klefki's Keyring ability).
 // The primary item is already applied via makePokemon; this handles extras.
 function applyExtraItem(pk, itemName, data) {
-  if (itemName === 'Health Charm') {
-    pk.baseMaxHp += 50; pk.maxHp += 50; pk.hp += 50;
-  } else if (itemName === 'Power Herb') {
+  if (itemName === 'Power Herb') {
     pk.energy = Math.min(Constants.MAX_ENERGY, pk.energy + 1);
   } else if (itemName === 'Quick Claw') {
     pk.quickClawActive = true;
@@ -123,6 +121,7 @@ function applyExtraItem(pk, itemName, data) {
   }
   // Other items (reactive/proc-based) are tracked in pk.heldItems
   // and checked at hook sites via getHeldItems()
+  // HP-boosting items (Health Charm, Power Weight) are handled by applyItemHpBonuses()
 }
 
 // ============================================================
@@ -190,6 +189,50 @@ function applyBloomingGardenAura(G) {
   });
 }
 
+// Apply HP bonuses from held items (Health Charm, Power Weight)
+// Works like Blooming Garden - dynamically applied/removed based on items held
+function applyItemHpBonuses(G) {
+  _deps();
+  [1, 2].forEach(function(playerNum) {
+    var p = G.players[playerNum];
+    var inPlay = [p.active].concat(p.bench).filter(Boolean);
+    inPlay.forEach(function(pk) {
+      if (!pk.baseMaxHp) pk.baseMaxHp = pk.maxHp;
+      
+      // Calculate total HP bonus from all held items
+      var hpBonus = 0;
+      var items = DamagePipeline.getHeldItems(pk);
+      for (var i = 0; i < items.length; i++) {
+        if (items[i] === 'Health Charm') hpBonus += 50;
+        if (items[i] === 'Power Weight') hpBonus += 40;
+      }
+      
+      var targetMax = pk.baseMaxHp + hpBonus;
+      if (targetMax !== pk.maxHp) {
+        var delta = targetMax - pk.maxHp;
+        pk.maxHp = targetMax;
+        if (pk.hp > 0) {
+          // Adjust current HP by the delta
+          pk.hp = pk.hp + delta;
+          pk.damage = Math.max(0, pk.maxHp - pk.hp);
+          
+          // If HP drops to 0 or below due to losing HP bonus, trigger KO
+          if (pk.hp <= 0) {
+            pk.hp = 0;
+            pk.damage = pk.maxHp;
+            // Queue KO handling
+            if (G.pendingRetreats.findIndex(function(pr) { return pr.player === playerNum; }) === -1) {
+              G.pendingRetreats.push({ player: playerNum, reason: 'ko' });
+              addLog(G, pk.name + ' was KO\'d! (HP bonus removed)', 'ko');
+              G.events.push({ type: 'ko', pokemon: pk.name, owner: playerNum });
+            }
+          }
+        }
+      }
+    });
+  });
+}
+
 // ============================================================
 // TURN MANAGEMENT
 // ============================================================
@@ -210,12 +253,15 @@ function startTurn(G) {
   if (p.active) p.active.improviseActive = false;
   G.targeting = null;
   applyBloomingGardenAura(G);
+  applyItemHpBonuses(G);
 
-  // Clear shields / vulnerability / locked attacks
+  // Clear shields / vulnerability / locked attacks / activated item flags
   var allPokemon = [p.active].concat(p.bench).filter(Boolean);
   allPokemon.forEach(function(pk) {
     pk.shields = [];
     pk.vulnerability = 0;
+    pk.technoClawsUsed = false;
+    pk.lifeDewUsed = false;
     if (pk.cantUseAttack && pk.cantUseAttackUntilTurn && G.turn > pk.cantUseAttackUntilTurn) {
       pk.cantUseAttack = null;
       pk.cantUseAttackUntilTurn = 0;
@@ -361,17 +407,35 @@ function endTurn(G) {
     }
   }
 
-  // Leftovers: heal 10 (both players' pokemon)
+  // Turn-end item effects (Leftovers heal, Black Sludge damage, etc.)
+  _deps();
   for (var li = 0; li < sides.length; li++) {
     var lSide = sides[li];
     var allPk = [lSide.player.active].concat(lSide.player.bench).filter(Boolean);
     for (var pi = 0; pi < allPk.length; pi++) {
       var lpk = allPk[pi];
-      if (lpk.heldItem === 'Leftovers' && lpk.damage > 0 && lpk.hp > 0) {
-        lpk.damage = Math.max(0, lpk.damage - 10);
-        lpk.hp = lpk.maxHp - lpk.damage;
-        addLog(G, 'Leftovers heals ' + lpk.name + ' 10', 'heal');
-        G.events.push({ type: 'item_heal', item: 'Leftovers', pokemon: lpk.name, amount: 10, owner: lSide.pNum });
+      var items = DamagePipeline.getHeldItems(lpk);
+      for (var ii = 0; ii < items.length; ii++) {
+        var itemResult = ItemDB.runItemHook('onTurnEnd', items[ii], {
+          holder: lpk, G: G
+        });
+        if (itemResult) {
+          if (itemResult.heal && lpk.damage > 0 && lpk.hp > 0) {
+            lpk.damage = Math.max(0, lpk.damage - itemResult.heal);
+            lpk.hp = lpk.maxHp - lpk.damage;
+            addLog(G, items[ii] + ' heals ' + lpk.name + ' ' + itemResult.heal, 'heal');
+            G.events.push({ type: 'item_heal', item: items[ii], pokemon: lpk.name, amount: itemResult.heal, owner: lSide.pNum });
+          }
+          if (itemResult.selfDamage && lpk.hp > 0) {
+            var dmgResult = DamagePipeline.applyDamage(G, lpk, itemResult.selfDamage, lSide.pNum);
+            addLog(G, items[ii] + ' damages ' + lpk.name + ' ' + itemResult.selfDamage, 'damage');
+            G.events.push({ type: 'item_damage', item: items[ii], pokemon: lpk.name, amount: itemResult.selfDamage, owner: lSide.pNum });
+            if (dmgResult.ko) {
+              var koEvents = DamagePipeline.handleKO(G, lpk, lSide.pNum);
+              G.events = G.events.concat(koEvents);
+            }
+          }
+        }
       }
     }
   }
@@ -969,6 +1033,16 @@ function doRetreat(G) {
     return false;
   }
 
+  // Heavy Boots check
+  var items = DamagePipeline.getHeldItems(p.active);
+  for (var i = 0; i < items.length; i++) {
+    var retreatHook = ItemDB.runItemHook('onRetreat', items[i], { holder: p.active, reason: 'retreat' });
+    if (retreatHook && retreatHook.preventRetreat) {
+      addLog(G, p.active.name + " cannot retreat due to " + items[i] + "!", 'info');
+      return false;
+    }
+  }
+
   if (isBlockedByBlockade(G, p.active)) return false;
 
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'retreat' });
@@ -985,9 +1059,20 @@ function doQuickRetreat(G) {
     addLog(G, p.active.name + " is Asleep and can't retreat!", 'info');
     return false;
   }
+
+  // Heavy Boots check
+  var items = DamagePipeline.getHeldItems(p.active);
+  for (var i = 0; i < items.length; i++) {
+    var retreatCheck = ItemDB.runItemHook('onRetreat', items[i], { holder: p.active, reason: 'quick' });
+    if (retreatCheck && retreatCheck.preventRetreat) {
+      addLog(G, p.active.name + " cannot retreat due to " + items[i] + "!", 'info');
+      return false;
+    }
+  }
+
   var cost = 2;
-  if (p.active.heldItem) {
-    var retreatHook = ItemDB.runItemHook('onRetreat', p.active.heldItem, { holder: p.active, reason: 'quick' });
+  for (var i = 0; i < items.length; i++) {
+    var retreatHook = ItemDB.runItemHook('onRetreat', items[i], { holder: p.active, reason: 'quick' });
     if (retreatHook && retreatHook.costReduction) cost = Math.max(0, cost - retreatHook.costReduction);
   }
   if (p.active.energy < cost) return false;
@@ -1260,7 +1345,7 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_damage', ability: 'deadlySlice', target: dsTarget.name, amount: 30, owner: opp(G.currentPlayer) });
       G.events = G.events.concat(dsResult.events);
       if (dsResult.ko) {
-        var dsKoEvents = DamagePipeline.handleKO(G, dsTarget, op(G));
+        var dsKoEvents = DamagePipeline.handleKO(G, dsTarget, opp(G.currentPlayer));
         G.events = G.events.concat(dsKoEvents);
       }
       p.usedAbilities[key] = true;
@@ -1665,6 +1750,28 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
         reason: 'bloodthirsty'
       });
       break;
+
+    case 'technoClaws':
+      // Techno Claws: deal 40 damage to any Pokemon
+      var p = cp(G);
+      if (p.mana < 1) return false;
+      if (!p.active || p.active.heldItem !== 'Techno Claws') return false;
+      if (p.active.technoClawsUsed) return false;
+      
+      p.mana -= 1;
+      p.active.technoClawsUsed = true;
+      
+      var technoResult = DamagePipeline.applyDamage(G, targetPk, 40, targetPlayer);
+      addLog(G, 'Techno Claws: 40 to ' + targetPk.name + '!', 'effect');
+      G.events.push({ type: 'mana_spent', player: G.currentPlayer, amount: 1, source: 'Techno Claws' });
+      G.events.push({ type: 'item_ability_damage', item: 'Techno Claws', target: targetPk.name, amount: 40, owner: targetPlayer, benchIdx: targetBenchIdx });
+      G.events = G.events.concat(technoResult.events);
+      
+      if (technoResult.ko) {
+        var technoKo = DamagePipeline.handleKO(G, targetPk, targetPlayer, { endTurnAfterSwitch: false });
+        G.events = G.events.concat(technoKo);
+      }
+      break;
   }
 
   return true;
@@ -1826,6 +1933,7 @@ function processSetupChoice(G, playerNum, choices) {
 function processAction(G, playerNum, action) {
   function finish(result) {
     applyBloomingGardenAura(G);
+    applyItemHpBonuses(G);
     return result;
   }
 
@@ -1864,6 +1972,8 @@ function processAction(G, playerNum, action) {
     case 'playPokemon': return finish(doPlayPokemon(G, action.handIdx, action.itemHandIdx, action.extraItemIndices));
     case 'useAbility': return finish(doUseAbility(G, action.key, action.sourceBenchIdx));
     case 'discardItem': return finish(doDiscardItem(G, action.slot, action.benchIdx, action.itemName));
+    case 'technoClaws': return finish(doTechnoClaws(G, action.targetPlayer, action.targetBenchIdx));
+    case 'lifeDew': return finish(doLifeDew(G, action.benchIdx));
     case 'cancelTargeting': return finish(doCancelTargeting(G));
     case 'endTurn': return finish(doEndTurnAction(G));
     default: return finish(false);
@@ -1904,6 +2014,91 @@ function filterStateForPlayer(G, playerNum) {
 }
 
 // ============================================================
+// ACTIVATED ITEM ABILITIES
+// ============================================================
+
+// Techno Claws: Spend 1 mana to deal 40 damage to any Pokemon
+function doTechnoClaws(G, targetPlayer, targetBenchIdx) {
+  _deps();
+  var p = cp(G);
+  if (!p.active || p.active.heldItem !== 'Techno Claws') return false;
+  if (p.mana < 1) return false;
+  if (p.active.technoClawsUsed) return false; // Once per turn
+
+  var targetPokemon;
+  if (targetBenchIdx === -1) {
+    targetPokemon = G.players[targetPlayer].active;
+  } else {
+    targetPokemon = G.players[targetPlayer].bench[targetBenchIdx];
+  }
+  if (!targetPokemon || targetPokemon.hp <= 0) return false;
+
+  p.mana -= 1;
+  p.active.technoClawsUsed = true;
+  addLog(G, p.active.name + ' uses Techno Claws!', 'ability');
+  G.events.push({ type: 'mana_spent', player: G.currentPlayer, amount: 1, source: 'Techno Claws' });
+
+  var dmgResult = DamagePipeline.applyDamage(G, targetPokemon, 40, targetPlayer);
+  addLog(G, 'Techno Claws deals 40 damage to ' + targetPokemon.name + '!', 'damage');
+  G.events.push({ 
+    type: 'item_ability_damage', 
+    item: 'Techno Claws', 
+    target: targetPokemon.name, 
+    amount: 40, 
+    targetOwner: targetPlayer,
+    benchIdx: targetBenchIdx
+  });
+  G.events = G.events.concat(dmgResult.events);
+
+  if (dmgResult.ko) {
+    var koEvents = DamagePipeline.handleKO(G, targetPokemon, targetPlayer);
+    G.events = G.events.concat(koEvents);
+  }
+
+  return true;
+}
+
+// Life Dew: Spend 1 mana to heal 50 damage from holder (can be used on any Pokemon)
+function doLifeDew(G, benchIdx) {
+  _deps();
+  var p = cp(G);
+  if (p.mana < 1) return false;
+
+  // Find the Pokemon with Life Dew
+  var targetPokemon;
+  var isActive = false;
+  if (benchIdx === -1) {
+    targetPokemon = p.active;
+    isActive = true;
+  } else {
+    targetPokemon = p.bench[benchIdx];
+  }
+
+  if (!targetPokemon || targetPokemon.heldItem !== 'Life Dew') return false;
+  if (targetPokemon.lifeDewUsed) return false; // Once per turn
+  if (targetPokemon.damage === 0) return false; // No damage to heal
+
+  p.mana -= 1;
+  targetPokemon.lifeDewUsed = true;
+  var healAmount = Math.min(50, targetPokemon.damage);
+  targetPokemon.damage = Math.max(0, targetPokemon.damage - healAmount);
+  targetPokemon.hp = targetPokemon.maxHp - targetPokemon.damage;
+
+  addLog(G, targetPokemon.name + ' uses Life Dew and heals ' + healAmount + ' HP!', 'heal');
+  G.events.push({ type: 'mana_spent', player: G.currentPlayer, amount: 1, source: 'Life Dew' });
+  G.events.push({ 
+    type: 'item_ability_heal', 
+    item: 'Life Dew', 
+    pokemon: targetPokemon.name, 
+    amount: healAmount, 
+    owner: G.currentPlayer,
+    benchIdx: benchIdx
+  });
+
+  return true;
+}
+
+// ============================================================
 // EXPORTS
 // ============================================================
 exports.createGame = createGame;
@@ -1918,6 +2113,8 @@ exports.filterStateForPlayer = filterStateForPlayer;
 exports.getCopiedAttacks = getCopiedAttacks;
 exports.doAbilityTarget = doAbilityTarget;
 exports.doBenchAttack = doBenchAttack;
+exports.doTechnoClaws = doTechnoClaws;
+exports.doLifeDew = doLifeDew;
 exports.addLog = addLog;
 exports.isPassiveBlocked = isPassiveBlocked;
 exports.opp = opp;

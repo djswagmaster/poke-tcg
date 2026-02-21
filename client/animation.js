@@ -369,10 +369,12 @@ var AnimQueue = (function() {
       case 'heal':
       case 'ability_heal':
       case 'item_heal':
+      case 'item_ability_heal':
         if (ctx.captureHpState) ctx.captureHpState();
         var healTarget = evt.target || evt.pokemon;
         var healSel = null;
-        if (evt.owner) healSel = ctx.getPokemonSelector(evt.owner, -1);
+        var healBenchIdx = evt.benchIdx !== undefined ? evt.benchIdx : -1;
+        if (evt.owner !== undefined) healSel = ctx.getPokemonSelector(evt.owner, healBenchIdx);
         if (!healSel && ctx.findPokemonSelector && healTarget) healSel = ctx.findPokemonSelector(healTarget);
         if (healSel) {
           ctx.showDamagePopupAt(evt.amount, healSel, true);
@@ -611,17 +613,21 @@ var AnimQueue = (function() {
       // ABILITY DAMAGE
       // ==========================================================
       case 'ability_damage':
+      case 'item_ability_damage':
         if (ctx.captureHpState) ctx.captureHpState();
         var abSel = null;
-        if (evt.owner) abSel = ctx.getPokemonSelector(evt.owner, -1);
+        var abOwner = evt.owner || evt.targetOwner;
+        var abBenchIdx = evt.benchIdx !== undefined ? evt.benchIdx : -1;
+        if (abOwner !== undefined) abSel = ctx.getPokemonSelector(abOwner, abBenchIdx);
         if (!abSel && ctx.findPokemonSelector && evt.target) abSel = ctx.findPokemonSelector(evt.target);
         if (abSel) {
           ctx.showDamagePopupAt(evt.amount, abSel, false);
           ctx.animateEl(abSel, 'recoil-shake', 400);
           ctx.spawnParticlesAtEl(abSel, '#c084fc', 8, { spread: 35 });
         }
+        // Progressively apply damage to snapshot state
         if (typeof window !== 'undefined' && window.G && evt.amount) {
-          var adPk = _findPokemonObj(evt.target, evt.owner);
+          var adPk = _findPokemonObj(evt.target, abOwner);
           if (adPk) {
             adPk.damage = (adPk.damage || 0) + evt.amount;
             adPk.hp = Math.max(0, adPk.maxHp - adPk.damage);

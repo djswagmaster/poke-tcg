@@ -31,9 +31,20 @@
 var ITEM_DB = [
   // ---- Damage reduction ----
   {
-    name: "Assault Vest", desc: "-20 damage taken", key: "assaultVest",
+    name: "Assault Vest", desc: "After attacking: -30 dmg next turn", key: "assaultVest",
     hooks: {
-      onTakeDamage: function(ctx) { return { reduction: 20 }; }
+      onAttack: function(ctx) {
+        // Set flag that this Pokemon attacked, granting reduction next turn
+        ctx.holder.assaultVestActive = ctx.G.turn + 1;
+        return null;
+      },
+      onTakeDamage: function(ctx) {
+        // Check if Assault Vest is active (attacked last turn)
+        if (ctx.holder.assaultVestActive && ctx.holder.assaultVestActive === ctx.G.turn) {
+          return { reduction: 30 };
+        }
+        return null;
+      }
     }
   },
 
@@ -183,8 +194,26 @@ var ITEM_DB = [
     name: "Lucky Punch", desc: "50%: +20 dmg + Normal weak", key: "luckyPunch",
     hooks: {
       onCalcDamageBonus: function(ctx) {
-        if (ctx.isOppActive && Math.random() < 0.5) {
-          return { bonusDmg: 20, addType: 'Normal' };
+        if (ctx.isOppActive) {
+          // Roll once and store result on holder
+          var proc = Math.random() < 0.5;
+          ctx.holder._luckyPunchProc = proc;
+          if (proc) {
+            return { bonusDmg: 20, luckyProc: true };
+          }
+        }
+        return null;
+      },
+      onCalcWeakness: function(ctx) {
+        // Check if Lucky Punch proc'd in the damage bonus phase
+        if (ctx.isOppActive && ctx.holder._luckyPunchProc) {
+          // Clear the flag
+          ctx.holder._luckyPunchProc = false;
+          // If defender is not already weak to Normal, make them weak (1.5x)
+          // If already weak, don't stack (keep existing mult)
+          if (ctx.mult < 1.5) {
+            return { mult: 1.5 };
+          }
         }
         return null;
       }
@@ -399,6 +428,95 @@ var ITEM_DB = [
       onTeamTakeDamage: function(ctx) {
         // Only applies if holder is the active pokemon
         if (ctx.holderIsActive) return { reduction: 10 };
+        return null;
+      }
+    }
+  },
+
+  // ---- Heavy Boots: prevent retreat ----
+  {
+    name: "Heavy Boots", desc: "Cannot retreat", key: "heavyBoots",
+    hooks: {
+      onRetreat: function(ctx) { return { preventRetreat: true }; }
+    }
+  },
+
+  // ---- Black Sludge: damage after each turn ----
+  {
+    name: "Black Sludge", desc: "Lose 10 HP after each turn", key: "blackSludge",
+    hooks: {
+      onTurnEnd: function(ctx) {
+        if (ctx.holder.hp > 0) {
+          return { selfDamage: 10 };
+        }
+        return null;
+      }
+    }
+  },
+
+  // ---- Techno Claws: activated ability (1 mana for 40 damage) ----
+  {
+    name: "Techno Claws", desc: "Active: 1 mana to deal 40 dmg", key: "technoClaws",
+    hooks: {
+      // This is an activated ability, handled in game logic
+      // Hook is just for metadata
+    }
+  },
+
+  // ---- Life Dew: activated ability (1 mana to heal 50) ----
+  {
+    name: "Life Dew", desc: "Active: 1 mana to heal 50", key: "lifeDew",
+    hooks: {
+      // This is an activated ability, handled in game logic
+      // Hook is just for metadata
+    }
+  },
+
+  // ---- Hard Charm: flat damage reduction ----
+  {
+    name: "Hard Charm", desc: "-20 damage taken", key: "hardCharm",
+    hooks: {
+      onTakeDamage: function(ctx) { return { reduction: 20 }; }
+    }
+  },
+
+  // ---- Power Weight: HP bonus + damage bonus + energy loss ----
+  {
+    name: "Power Weight", desc: "+40 HP, +20 dmg, lose 1 energy on attack", key: "powerWeight",
+    hooks: {
+      onDeploy: function(ctx) { return { hpBonus: 40 }; },
+      onCalcDamageBonus: function(ctx) {
+        if (ctx.isOppActive) return { bonusDmg: 20 };
+        return null;
+      },
+      onAttack: function(ctx) {
+        if (ctx.holder.energy > 0) {
+          return { energyLoss: 1 };
+        }
+        return null;
+      }
+    }
+  },
+
+  // ---- Retaliate Claw: reactive damage on being hit ----
+  {
+    name: "Retaliate Claw", desc: "Attacked: 50 dmg back, discard", key: "retaliateClaw", oneTime: true,
+    hooks: {
+      onDamagedByAttack: function(ctx) {
+        return { 
+          events: [{ type: 'damage', target: ctx.attacker, amount: 50, source: 'Retaliate Claw' }],
+          discard: true
+        };
+      }
+    }
+  },
+
+  // ---- Rage Belt: damage bonus when low HP ----
+  {
+    name: "Rage Belt", desc: "<=50 HP: +50 dmg", key: "rageBelt",
+    hooks: {
+      onCalcDamageBonus: function(ctx) {
+        if (ctx.isOppActive && ctx.holder.hp <= 50) return { bonusDmg: 50 };
         return null;
       }
     }
