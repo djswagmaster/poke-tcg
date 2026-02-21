@@ -312,6 +312,41 @@ register('forceSwitch', function(G, ctx, params) {
   return null;
 });
 
+// --- Trick: swap held items between both actives ---
+register('trick', function(G, ctx, params) {
+  if (!ctx.defender || ctx.defender.hp <= 0) return null;
+
+  var atkItem = ctx.attacker.heldItem;
+  var defItem = ctx.defender.heldItem;
+  var atkItems = ctx.attacker.heldItems ? ctx.attacker.heldItems.slice() : null;
+  var defItems = ctx.defender.heldItems ? ctx.defender.heldItems.slice() : null;
+  var atkUsed = ctx.attacker.heldItemUsed;
+  var defUsed = ctx.defender.heldItemUsed;
+
+  // Swap primary held items
+  ctx.attacker.heldItem = defItem;
+  ctx.defender.heldItem = atkItem;
+
+  // Swap multi-item arrays (Klefki)
+  ctx.attacker.heldItems = defItems;
+  ctx.defender.heldItems = atkItems;
+
+  // Swap used flags
+  ctx.attacker.heldItemUsed = defUsed;
+  ctx.defender.heldItemUsed = atkUsed;
+
+  // Update Quick Claw state after swap
+  ctx.attacker.quickClawActive = (ctx.attacker.heldItem === 'Quick Claw');
+  ctx.defender.quickClawActive = (ctx.defender.heldItem === 'Quick Claw');
+
+  var atkLabel = atkItem || 'nothing';
+  var defLabel = defItem || 'nothing';
+  ctx.events.push({ type: 'log', text: 'Trick swapped items! ' + ctx.attacker.name + ' got ' + defLabel + ', ' + ctx.defender.name + ' got ' + atkLabel, cls: 'effect' });
+  ctx.events.push({ type: 'item_swap', attacker: ctx.attacker.name, defender: ctx.defender.name, atkGot: defItem, defGot: atkItem, owner: ctx.currentPlayer });
+
+  return null;
+});
+
 // --- Bench damage to ALL benches ---
 register('benchAll', function(G, ctx, params) {
   _deps();

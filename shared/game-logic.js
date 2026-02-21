@@ -372,7 +372,7 @@ function endTurn(G) {
         G.events = G.events.concat(burnResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
       }
       // Magma Sear: opponent's Magmar forces burn recovery to always fail
-      var magmaSearActive = !isPassiveBlocked(G) && _oppHasPassive(G, side.pNum, 'magmaSear');
+      var magmaSearActive = _oppHasPassive(G, side.pNum, 'magmaSear');
       var burnCoinHeads = magmaSearActive ? false : (Math.random() < 0.5);
       if (pk.hp > 0 && pk.status.indexOf('burn') !== -1 && burnCoinHeads) {
         pk.status = pk.status.filter(function(s) { return s !== 'burn'; });
@@ -735,6 +735,17 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   }
 
   if (!defender) return;
+
+  // Poltergeist: does nothing if defender has no held item
+  if (fx.indexOf('poltergeist') !== -1) {
+    var defHasItem = defender.heldItem || (defender.heldItems && defender.heldItems.length > 0);
+    if (!defHasItem) {
+      addLog(G, 'Poltergeist failed — ' + defender.name + ' has no Held Item!', 'info');
+      G.events.push({ type: 'attack_fail', attack: 'Poltergeist', reason: 'noItem', pokemon: defender.name });
+      finalizeAttack(G, attacker);
+      return;
+    }
+  }
 
   // Main damage
   var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|scaleBenchAll|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
@@ -1614,7 +1625,7 @@ function checkStatusBeforeAttack(G, attacker) {
   }
   if (attacker.status.indexOf('confusion') !== -1) {
     // Topsy Turvy: opponent's Malamar forces confusion coin to tails
-    var topsyTurvyActive = !isPassiveBlocked(G) && _oppHasPassive(G, G.currentPlayer, 'topsyTurvy');
+    var topsyTurvyActive = _oppHasPassive(G, G.currentPlayer, 'topsyTurvy');
     var confusionCoinHeads = topsyTurvyActive ? false : (Math.random() < 0.5);
     if (confusionCoinHeads) {
       attacker.status = attacker.status.filter(function(s) { return s !== 'confusion'; });
