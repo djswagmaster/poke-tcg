@@ -33,8 +33,8 @@ void 0; // placeholder
 const G = {
   phase:'deckBuildP1', currentPlayer:1, turn:0,
   players: {
-    1: { name:'Player 1', mana:0, pokeMana:25, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
-    2: { name:'Player 2', mana:0, pokeMana:25, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
+    1: { name:'Player 1', mana:0, pokeMana:30, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
+    2: { name:'Player 2', mana:0, pokeMana:30, kos:0, deck:[], hand:[], active:null, bench:[], usedAbilities:{}, maxBench:Constants.MAX_BENCH },
   },
   log: [],
   events: [], // Event array used by shared game-logic
@@ -716,6 +716,27 @@ function cancelTargetingAction() {
   dispatchAction({ type: 'cancelTargeting' });
 }
 
+function actionRecycleSelect(itemName) {
+  if (G.animating) return;
+  if (!G.targeting || G.targeting.type !== 'recycle') return;
+  if (isOnline) { sendAction({ actionType: 'recycleSelect', itemName: itemName }); return; }
+  dispatchAction({ type: 'recycleSelect', itemName: itemName });
+}
+
+function actionResurrectSelect(pokemonName) {
+  if (G.animating) return;
+  if (!G.targeting || G.targeting.type !== 'resurrect') return;
+  if (isOnline) { sendAction({ actionType: 'resurrectSelect', pokemonName: pokemonName }); return; }
+  dispatchAction({ type: 'resurrectSelect', pokemonName: pokemonName });
+}
+
+function actionResurrectDone() {
+  if (G.animating) return;
+  if (!G.targeting || G.targeting.type !== 'resurrect') return;
+  if (isOnline) { sendAction({ actionType: 'resurrectDone' }); return; }
+  dispatchAction({ type: 'resurrectDone' });
+}
+
 async function actionCopiedAttack(copiedIdx, forceOptBoost = null) {
   if (G.animating) return;
   const copied = copiedAttacks[copiedIdx];
@@ -1156,10 +1177,13 @@ function renderSetup() {
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
-      const canAfford = p.mana >= data.cost && p.pokeMana >= data.cost;
+      const setupManaCost = data.cost;
+      const setupPokeCost = data.shiny ? data.cost * 2 : data.cost;
+      const canAfford = p.mana >= setupManaCost && p.pokeMana >= setupPokeCost;
+      const setupCostLabel = data.shiny ? `★${setupManaCost}⬡ · ${setupPokeCost}P⬡` : `${data.cost}⬡`;
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `selectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
-        <span class="cost-badge">${data.cost}⬡</span>
+        <span class="cost-badge">${setupCostLabel}</span>
         <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
@@ -1208,10 +1232,12 @@ function selectSetupPokemon(name) {
   if (!isActivePhase && setupSelected.length >= (p.maxBench || Constants.MAX_BENCH)) return;
 
   const data = getPokemonData(name);
-  if (p.mana < data.cost || p.pokeMana < data.cost) return;
+  const selManaCost = data.cost;
+  const selPokeCost = data.shiny ? data.cost * 2 : data.cost;
+  if (p.mana < selManaCost || p.pokeMana < selPokeCost) return;
 
-  p.mana -= data.cost;
-  p.pokeMana -= data.cost;
+  p.mana -= selManaCost;
+  p.pokeMana -= selPokeCost;
   setupItemFor = name;
   setupKeyringItems = [];
   renderSetup();
@@ -1223,8 +1249,10 @@ function cancelSetupItem() {
   const p = G.players[playerNum];
   const data = getPokemonData(setupItemFor);
   if (data) {
-    p.mana += data.cost;
-    p.pokeMana += data.cost;
+    const cancelManaCost = data.cost;
+    const cancelPokeCost = data.shiny ? data.cost * 2 : data.cost;
+    p.mana += cancelManaCost;
+    p.pokeMana += cancelPokeCost;
   }
   setupItemFor = null;
   setupKeyringItems = [];
@@ -1259,8 +1287,10 @@ function unselectSetup(idx) {
   const p = G.players[playerNum];
   const data = getPokemonData(removed.name);
   if (data) {
-    p.mana += data.cost;
-    p.pokeMana += data.cost;
+    const removeManaCost = data.cost;
+    const removePokeCost = data.shiny ? data.cost * 2 : data.cost;
+    p.mana += removeManaCost;
+    p.pokeMana += removePokeCost;
   }
   renderSetup();
 }
@@ -1565,7 +1595,29 @@ function renderActionPanel() {
     const cancelBtn = canCancelTargeting
       ? `<button onclick="cancelTargetingAction()" style="margin-left:8px;padding:2px 10px;border:none;border-radius:6px;background:rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:10px">Cancel</button>`
       : '';
-    panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET ${cancelBtn}</div>`;
+    if (G.targeting.type === 'recycle') {
+      let rhtml = `<div class="ap-section-label" style="color:#f59e0b">SELECT AN ITEM FROM DISCARD PILE ${cancelBtn}</div>`;
+      rhtml += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px">';
+      G.targeting.validTargets.forEach(t => {
+        rhtml += `<div class="ap-recycle-item" onclick="actionRecycleSelect('${t.itemName.replace(/'/g,"\\'")}')"><img src="${getImg(t.itemName)}"><span>${t.itemName}</span></div>`;
+      });
+      rhtml += '</div>';
+      panel.innerHTML = rhtml;
+    } else if (G.targeting.type === 'resurrect') {
+      const remaining = G.targeting.attackInfo.maxSelections - G.targeting.attackInfo.currentSelections;
+      let rhtml = `<div class="ap-section-label" style="color:#f59e0b">REVIVE A POKEMON (${remaining} remaining)</div>`;
+      rhtml += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px">';
+      G.targeting.validTargets.forEach(t => {
+        rhtml += `<div class="ap-resurrect-item" onclick="actionResurrectSelect('${t.pokemonName.replace(/'/g,"\\'")}')"><img src="${getImg(t.pokemonName)}"><span>${t.pokemonName}</span><span class="resurrect-cost">${t.cost}⬡</span></div>`;
+      });
+      rhtml += '</div>';
+      rhtml += `<button onclick="actionResurrectDone()" style="margin:8px;padding:6px 16px;border:none;border-radius:8px;background:#f59e0b;color:#000;cursor:pointer;font-weight:bold">Done</button>`;
+      panel.innerHTML = rhtml;
+    } else if (G.targeting.type === 'pollenPuff') {
+      panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">POLLEN PUFF: Choose any Pokémon (opp = damage, yours = heal) ${cancelBtn}</div>`;
+    } else {
+      panel.innerHTML = `<div class="ap-section-label" style="color:#f59e0b">SELECT A TARGET ${cancelBtn}</div>`;
+    }
     return;
   }
 
@@ -1659,7 +1711,8 @@ function renderActionPanel() {
     html += '<div class="ap-section-label">ATTACKS</div>';
     data.attacks.forEach((atk, i) => {
       const { cost, scarfReduction } = calcAttackCost(pk, atk, thickAromaCost);
-      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked(pk)) && pk.cantUseAttack !== atk.name && !G.animating;
+      const radiantLocked = atk.fx && atk.fx.indexOf('radiantResurrection') !== -1 && me.usedRadiantResurrection;
+      const canUse = pk.energy >= cost && !pk.status.includes('sleep') && !(data.ability?.key === 'defeatist' && pk.damage >= 120 && !isPassiveBlocked(pk)) && pk.cantUseAttack !== atk.name && !radiantLocked && !G.animating;
       const dmgLabel = atk.baseDmg > 0 ? ` | ${atk.baseDmg} dmg` : '';
       const costLabel = (thickAromaCost > 0 || scarfReduction) ? `${cost}⚡` : `${atk.energy}⚡`;
       html += `<button class="ap-btn ap-btn-attack" onclick="actionAttack(${i}, false)" ${canUse?'':'disabled'}>
@@ -1790,14 +1843,14 @@ function renderActionPanel() {
       <span class="atk-name">Retreat</span><span class="atk-detail">Ends turn</span>
     </button>`;
 
-    // Held item discard
+    // Show held item info (no discard option)
     const activeAllItems = (pk.heldItems && pk.heldItems.length > 0) ? pk.heldItems : (pk.heldItem ? [pk.heldItem] : []);
     if (activeAllItems.length > 0) {
       html += '<div class="ap-section-label">ITEM' + (activeAllItems.length > 1 ? 'S' : '') + '</div>';
       activeAllItems.forEach(hi => {
-        html += `<button class="ap-btn" onclick="discardHeldItem('active',null,'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
-        </button>`;
+        html += `<div class="ap-btn" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3);cursor:default;opacity:0.8">
+          <span class="atk-name">${hi}</span>
+        </div>`;
       });
     }
   }
@@ -1845,14 +1898,14 @@ function renderActionPanel() {
       </button>`;
     }
 
-    // Held item discard
+    // Show held item info (no discard option)
     const benchAllItems = (selPk.heldItems && selPk.heldItems.length > 0) ? selPk.heldItems : (selPk.heldItem ? [selPk.heldItem] : []);
     if (benchAllItems.length > 0) {
       html += '<div class="ap-section-label">ITEM' + (benchAllItems.length > 1 ? 'S' : '') + '</div>';
       benchAllItems.forEach(hi => {
-        html += `<button class="ap-btn" onclick="discardHeldItem('bench',${bIdx},'${hi.replace(/'/g,"\\'")}')" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3)">
-          <span class="atk-name">${hi}</span><span class="atk-detail">Click to discard</span>
-        </button>`;
+        html += `<div class="ap-btn" style="background:rgba(168,85,247,0.1);border-color:rgba(168,85,247,0.3);cursor:default;opacity:0.8">
+          <span class="atk-name">${hi}</span>
+        </div>`;
       });
     }
 
@@ -1922,10 +1975,14 @@ function renderHandPanel() {
   pokemonHand.forEach((c, i) => {
     const realIdx = me.hand.indexOf(c);
     const data = getPokemonData(c.name);
-    const canAfford = me.mana >= data.cost && me.pokeMana >= data.cost && me.bench.length < (me.maxBench || Constants.MAX_BENCH);
+    const manaCost = data.cost;
+    const pokeCost = data.shiny ? data.cost * 2 : data.cost;
+    const canAfford = me.mana >= manaCost && me.pokeMana >= pokeCost && me.bench.length < (me.maxBench || Constants.MAX_BENCH);
+    const shinyLabel = data.shiny ? '★ ' : '';
+    const costLabel = data.shiny ? `${manaCost}⬡ · ${pokeCost}P⬡ (${data.cost}x2)` : `${data.cost}⬡`;
     html += `<div class="ap-hand-card ${canAfford?'':'cant-afford'}" onclick="actionPlayPokemon(${realIdx})">
       <img src="${getImg(c.name)}">
-      <div><div class="hc-name">${c.name}</div><div class="hc-cost">${data.cost}⬡ · ${data.hp}HP</div></div>
+      <div><div class="hc-name">${shinyLabel}${c.name}</div><div class="hc-cost">${costLabel} · ${data.hp}HP</div></div>
       <button class="hc-view-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍 View</button>
     </div>`;
   });
@@ -1935,6 +1992,32 @@ function renderHandPanel() {
       html += `<div class="ap-hand-card" style="cursor:pointer" onclick="zoomCard('${c.name.replace(/'/g,"\\'")}')"><img src="${getImg(c.name)}"><div><div class="hc-name">${c.name}</div></div></div>`;
     });
   }
+
+  // Discard pile
+  const discardPile = me.discardPile || [];
+  if (discardPile.length > 0) {
+    // Count duplicates for cleaner display
+    const counts = {};
+    discardPile.forEach(item => { counts[item] = (counts[item] || 0) + 1; });
+    html += `<div class="ap-hand-title" style="margin-top:12px">DISCARD PILE (${discardPile.length})</div>`;
+    Object.keys(counts).forEach(item => {
+      const label = counts[item] > 1 ? `${item} x${counts[item]}` : item;
+      html += `<div class="ap-discard-card" onclick="zoomCard('${item.replace(/'/g,"\\'")}')"><img src="${getImg(item)}"><div class="hc-name">${label}</div></div>`;
+    });
+  }
+
+  // KO pool (knocked out Pokemon)
+  const koPool = me.koPool || [];
+  if (koPool.length > 0) {
+    const koCounts = {};
+    koPool.forEach(name => { koCounts[name] = (koCounts[name] || 0) + 1; });
+    html += `<div class="ap-hand-title" style="margin-top:12px">KO'D POKEMON (${koPool.length})</div>`;
+    Object.keys(koCounts).forEach(name => {
+      const label = koCounts[name] > 1 ? `${name} x${koCounts[name]}` : name;
+      html += `<div class="ap-ko-card" onclick="zoomCard('${name.replace(/'/g,"\\'")}')"><img src="${getImg(name)}"><div class="hc-name">${label}</div></div>`;
+    });
+  }
+
   panel.innerHTML = html;
 }
 
@@ -2314,9 +2397,10 @@ function renderOnlineSetup() {
   const hand = document.getElementById('setupHand');
 
   // Virtual remaining mana while selecting (server only decrements on confirm).
-  const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
-  const remainingMana = Math.max(0, (myP.mana || 0) - spent);
-  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spent);
+  const spentMana = onlineSetupSelected.reduce((sum, s) => { const d = getPokemonData(s.name); return sum + (d?.cost || 0); }, 0);
+  const spentPoke = onlineSetupSelected.reduce((sum, s) => { const d = getPokemonData(s.name); return sum + (d?.shiny ? d.cost * 2 : d?.cost || 0); }, 0);
+  const remainingMana = Math.max(0, (myP.mana || 0) - spentMana);
+  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spentPoke);
 
   const placedNames = new Set();
   if (myP.active) placedNames.add(myP.active.name);
@@ -2341,10 +2425,13 @@ function renderOnlineSetup() {
   } else {
     pokemonHand.forEach(c => {
       const data = getPokemonData(c.name);
-      const canAfford = remainingMana >= data.cost && remainingPokeMana >= data.cost;
+      const onlineManaCost = data.cost;
+      const onlinePokeCost = data.shiny ? data.cost * 2 : data.cost;
+      const canAfford = remainingMana >= onlineManaCost && remainingPokeMana >= onlinePokeCost;
+      const onlineCostLabel = data.shiny ? `★${onlineManaCost}⬡ · ${onlinePokeCost}P⬡` : `${data.cost}⬡`;
       html += `<div class="setup-card ${!canAfford?'placed':''}" onclick="${canAfford ? `onlineSelectSetupPokemon('${c.name.replace(/'/g,"\\'")}')` : ''}">
         <img src="${getImg(c.name)}" alt="${c.name}">
-        <span class="cost-badge">${data.cost}⬡</span>
+        <span class="cost-badge">${onlineCostLabel}</span>
         <div class="db-zoom-btn" onclick="event.stopPropagation();zoomCard('${c.name.replace(/'/g,"\\'")}')">🔍</div>
       </div>`;
     });
@@ -2407,11 +2494,14 @@ function onlineSelectSetupPokemon(name) {
   if (isActive && onlineSetupSelected.length >= 1) return;
   if (!isActive && onlineSetupSelected.length >= (myP.maxBench || Constants.MAX_BENCH)) return;
   // Enforce remaining mana and poke-mana client-side.
-  const spent = onlineSetupSelected.reduce((sum, s) => sum + (getPokemonData(s.name)?.cost || 0), 0);
-  const remainingMana = Math.max(0, (myP.mana || 0) - spent);
-  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spent);
+  const spentMana = onlineSetupSelected.reduce((sum, s) => { const d = getPokemonData(s.name); return sum + (d?.cost || 0); }, 0);
+  const spentPoke = onlineSetupSelected.reduce((sum, s) => { const d = getPokemonData(s.name); return sum + (d?.shiny ? d.cost * 2 : d?.cost || 0); }, 0);
+  const remainingMana = Math.max(0, (myP.mana || 0) - spentMana);
+  const remainingPokeMana = Math.max(0, (myP.pokeMana || 0) - spentPoke);
   const data = getPokemonData(name);
-  if (!data || remainingMana < data.cost || remainingPokeMana < data.cost) return;
+  const onlineManaCost = data?.cost || 0;
+  const onlinePokeCost = data?.shiny ? data.cost * 2 : data?.cost || 0;
+  if (!data || remainingMana < onlineManaCost || remainingPokeMana < onlinePokeCost) return;
   onlineSetupItemFor = name;
   renderOnlineSetup();
 }

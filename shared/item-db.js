@@ -220,6 +220,14 @@ var ITEM_DB = [
     }
   },
 
+  // ---- Mana on KO ----
+  {
+    name: "Lucky Egg", desc: "Gain 1 Mana when KO'd", key: "luckyEgg",
+    hooks: {
+      onKO: function(ctx) { return { manaGain: 1 }; }
+    }
+  },
+
   // ---- Status cure + heal ----
   {
     name: "Lum Berry", desc: "Cure status + heal 30", key: "lumBerry", oneTime: true,

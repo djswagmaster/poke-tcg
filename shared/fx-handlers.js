@@ -149,26 +149,9 @@ register('stripEnergy', function(G, ctx, params) {
   _deps();
   if (!ctx.defender || ctx.defender.hp <= 0) return null;
   var v = params[0] || 1;
-  var actual = Math.min(v, ctx.defender.energy);
-
-  // White Herb check
-  var defItems = DamagePipeline.getHeldItems(ctx.defender);
-  if (defItems.indexOf('White Herb') !== -1 && !ctx.defender.heldItemUsed) {
-    var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.defender, amount: actual });
-    if (whResult) {
-      var prevented = whResult.prevented || 0;
-      actual = Math.max(0, actual - prevented);
-      if (whResult.discard) {
-        ctx.defender.heldItemUsed = true;
-        if (ctx.defender.heldItem === 'White Herb') ctx.defender.heldItem = null;
-        if (ctx.defender.heldItems) { var wi = ctx.defender.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.defender.heldItems.splice(wi, 1); }
-      }
-      ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.defender.name, effect: 'preventEnergyLoss', prevented: prevented });
-    }
-  }
-
-  ctx.defender.energy = Math.max(0, ctx.defender.energy - actual);
-  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: actual, targetOwner: ctx.oppPlayerNum });
+  var result = DamagePipeline.loseEnergy(G, ctx.defender, v);
+  ctx.events = ctx.events.concat(result.events);
+  ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: result.actual, targetOwner: ctx.oppPlayerNum });
   return null;
 });
 
@@ -189,24 +172,9 @@ register('selfEnergyLoss', function(G, ctx, params) {
   _deps();
   var v = params[0] || 1;
   if (v >= 99) v = ctx.attacker.energy;
-
-  // White Herb on self
-  var atkItems = DamagePipeline.getHeldItems(ctx.attacker);
-  if (atkItems.indexOf('White Herb') !== -1 && !ctx.attacker.heldItemUsed) {
-    var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.attacker, amount: v });
-    if (whResult) {
-      v = Math.max(0, v - (whResult.prevented || 0));
-      if (whResult.discard) {
-        ctx.attacker.heldItemUsed = true;
-        if (ctx.attacker.heldItem === 'White Herb') ctx.attacker.heldItem = null;
-        if (ctx.attacker.heldItems) { var wi = ctx.attacker.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.attacker.heldItems.splice(wi, 1); }
-      }
-      ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.attacker.name, effect: 'preventEnergyLoss', prevented: whResult.prevented });
-    }
-  }
-
-  ctx.attacker.energy = Math.max(0, ctx.attacker.energy - v);
-  ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: v, owner: ctx.currentPlayer });
+  var result = DamagePipeline.loseEnergy(G, ctx.attacker, v);
+  ctx.events = ctx.events.concat(result.events);
+  ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: result.actual, owner: ctx.currentPlayer });
   return null;
 });
 
@@ -214,46 +182,20 @@ register('selfEnergyLoss', function(G, ctx, params) {
 register('mutualEnergyLoss', function(G, ctx, params) {
   _deps();
   var v = params[0] || 1;
-  
+
   // Attacker loses energy
-  var atkItems = DamagePipeline.getHeldItems(ctx.attacker);
-  var atkLoss = v;
-  if (atkItems.indexOf('White Herb') !== -1 && !ctx.attacker.heldItemUsed) {
-    var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.attacker, amount: atkLoss });
-    if (whResult) {
-      atkLoss = Math.max(0, atkLoss - (whResult.prevented || 0));
-      if (whResult.discard) {
-        ctx.attacker.heldItemUsed = true;
-        if (ctx.attacker.heldItem === 'White Herb') ctx.attacker.heldItem = null;
-        if (ctx.attacker.heldItems) { var wi = ctx.attacker.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.attacker.heldItems.splice(wi, 1); }
-      }
-      ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.attacker.name, effect: 'preventEnergyLoss', prevented: whResult.prevented });
-    }
-  }
-  ctx.attacker.energy = Math.max(0, ctx.attacker.energy - atkLoss);
-  if (atkLoss > 0) {
-    ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: atkLoss, owner: ctx.currentPlayer });
+  var atkResult = DamagePipeline.loseEnergy(G, ctx.attacker, v);
+  ctx.events = ctx.events.concat(atkResult.events);
+  if (atkResult.actual > 0) {
+    ctx.events.push({ type: 'selfEnergyLoss', pokemon: ctx.attacker.name, amount: atkResult.actual, owner: ctx.currentPlayer });
   }
 
   // Defender loses energy
   if (ctx.defender && ctx.defender.hp > 0) {
-    var defItems = DamagePipeline.getHeldItems(ctx.defender);
-    var defLoss = v;
-    if (defItems.indexOf('White Herb') !== -1 && !ctx.defender.heldItemUsed) {
-      var whDefResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: ctx.defender, amount: defLoss });
-      if (whDefResult) {
-        defLoss = Math.max(0, defLoss - (whDefResult.prevented || 0));
-        if (whDefResult.discard) {
-          ctx.defender.heldItemUsed = true;
-          if (ctx.defender.heldItem === 'White Herb') ctx.defender.heldItem = null;
-          if (ctx.defender.heldItems) { var wi = ctx.defender.heldItems.indexOf('White Herb'); if (wi !== -1) ctx.defender.heldItems.splice(wi, 1); }
-        }
-        ctx.events.push({ type: 'itemProc', item: 'White Herb', pokemon: ctx.defender.name, effect: 'preventEnergyLoss', prevented: whDefResult.prevented });
-      }
-    }
-    ctx.defender.energy = Math.max(0, ctx.defender.energy - defLoss);
-    if (defLoss > 0) {
-      ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: defLoss, targetOwner: ctx.oppPlayerNum });
+    var defResult = DamagePipeline.loseEnergy(G, ctx.defender, v);
+    ctx.events = ctx.events.concat(defResult.events);
+    if (defResult.actual > 0) {
+      ctx.events.push({ type: 'energyStrip', pokemon: ctx.defender.name, amount: defResult.actual, targetOwner: ctx.oppPlayerNum });
     }
   }
   
@@ -656,7 +598,8 @@ register('multiTarget', function(G, ctx, params) {
   });
 
   if (validTargets.length > 0) {
-    ctx.attacker.energy = Math.max(0, ctx.attacker.energy - 2);
+    var mtResult = DamagePipeline.loseEnergy(G, ctx.attacker, 2);
+    ctx.events = ctx.events.concat(mtResult.events);
     ctx.events.push({ type: 'multiTarget', dmg: dmg, count: count });
     ctx.targetingInfo = {
       type: 'multiTarget',
@@ -690,6 +633,9 @@ register('batonPass', function(G, ctx, params) {
 // --- Snipe (hit any Pokemon) ---
 register('snipe', function(G, ctx, params) {
   _deps();
+  // Guard: don't fire for sniperBench or swarmSnipe (substring match)
+  var afx = ctx.attack.fx || '';
+  if (afx.indexOf('sniperBench') !== -1 || afx.indexOf('swarmSnipe') !== -1) return null;
   var validTargets = [];
   [ctx.currentPlayer, ctx.oppPlayerNum].forEach(function(pNum) {
     var side = G.players[pNum];
@@ -705,6 +651,58 @@ register('snipe', function(G, ctx, params) {
       attackerTypes: ctx.attackerTypes,
       attacker: ctx.attacker,
       attack: ctx.attack
+    };
+    return 'pendingTarget';
+  }
+  return null;
+});
+
+// --- Perishing Cold: KO both Active Pokemon (Protect Goggles blocks opp KO) ---
+register('perishingCold', function(G, ctx, params) {
+  _deps();
+  var oppActive = ctx.oppPlayer.active;
+
+  // KO opponent's active (blocked by Protect Goggles)
+  if (oppActive && oppActive.hp > 0) {
+    if (oppActive.heldItem === 'Protect Goggles') {
+      ctx.events.push({ type: 'itemProc', item: 'Protect Goggles', pokemon: oppActive.name, effect: 'blockPerish' });
+    } else {
+      oppActive.damage = oppActive.maxHp;
+      oppActive.hp = 0;
+      ctx.events.push({ type: 'perishKO', pokemon: oppActive.name, owner: ctx.oppPlayerNum });
+      var koEvents = DamagePipeline.handleKO(G, oppActive, ctx.oppPlayerNum);
+      ctx.events = ctx.events.concat(koEvents);
+    }
+  }
+
+  // Self-KO (always happens)
+  if (ctx.attacker && ctx.attacker.hp > 0) {
+    ctx.attacker.damage = ctx.attacker.maxHp;
+    ctx.attacker.hp = 0;
+    ctx.events.push({ type: 'perishKO', pokemon: ctx.attacker.name, owner: ctx.currentPlayer });
+    // attacker KO handled by finalizeAttack
+  }
+
+  return null;
+});
+
+// --- Pollen Puff: choose any Pokemon in play (opp = 50 dmg, own = heal 50) ---
+register('pollenPuff', function(G, ctx, params) {
+  _deps();
+  var validTargets = [];
+  [ctx.currentPlayer, ctx.oppPlayerNum].forEach(function(pNum) {
+    var side = G.players[pNum];
+    if (side.active && side.active.hp > 0) validTargets.push({ player: pNum, idx: -1, pk: side.active });
+    side.bench.forEach(function(pk, bi) { if (pk.hp > 0) validTargets.push({ player: pNum, idx: bi, pk: pk }); });
+  });
+
+  if (validTargets.length > 0) {
+    ctx.targetingInfo = {
+      type: 'pollenPuff',
+      validTargets: validTargets,
+      attacker: ctx.attacker,
+      attack: ctx.attack,
+      attackerTypes: ctx.attackerTypes
     };
     return 'pendingTarget';
   }
@@ -771,16 +769,18 @@ function processPreDamageEffects(G, fx, attacker, currentPlayer) {
 
   if (fx.indexOf('gainMana:') !== -1) {
     var v = parseInt(fx.split('gainMana:')[1]);
-    p.mana = Math.min(Constants.MAX_MANA, p.mana + v);
-    events.push({ type: 'manaGain', player: currentPlayer, amount: v });
+    var gmResult = DamagePipeline.gainMana(G, currentPlayer, v);
+    if (gmResult.gained > 0) {
+      events.push({ type: 'manaGain', player: currentPlayer, amount: gmResult.gained });
+      for (var gmi = 0; gmi < gmResult.events.length; gmi++) events.push(gmResult.events[gmi]);
+    }
   }
 
   if (fx.indexOf('doubleMana') !== -1) {
-    var beforeMana = p.mana;
-    p.mana = Math.min(Constants.MAX_MANA, p.mana * 2);
-    var manaGained = p.mana - beforeMana;
-    if (manaGained > 0) {
-      events.push({ type: 'manaGain', player: currentPlayer, amount: manaGained });
+    var dmResult = DamagePipeline.gainMana(G, currentPlayer, p.mana);
+    if (dmResult.gained > 0) {
+      events.push({ type: 'manaGain', player: currentPlayer, amount: dmResult.gained });
+      for (var dmi = 0; dmi < dmResult.events.length; dmi++) events.push(dmResult.events[dmi]);
     }
   }
 
