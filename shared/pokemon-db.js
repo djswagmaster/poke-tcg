@@ -230,6 +230,9 @@ var POKEMON_DB = [
     ability:{name:"Filter",desc:"Block damage <=50",type:"passive",key:"filter"},
     attacks:[{name:"Steel Force",energy:4,baseDmg:80,desc:"-30 dmg next turn",fx:"selfShield:30"}]},
 
+  {name:"Shiny Mega Metagross",types:["Steel","Psychic"],cost:6,hp:300,shiny:true,
+    attacks:[{name:"Gatling Slug",energy:2,baseDmg:130,desc:"+10 per own energy",fx:"scaleOwn:10"}]},
+
   {name:"Mega Audino",types:["Normal","Fairy"],cost:4,hp:260,weakness:["Poison"],resistance:["Ghost","Dragon"],
     ability:{name:"Mega Checkup",desc:"1 mana: heal 30 + clear status on Active",type:"active",key:"healingTouch"},
     attacks:[{name:"Careful Hearing",energy:3,baseDmg:0,desc:"Gain 1 mana",fx:"gainMana:1"}]},
