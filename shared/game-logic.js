@@ -124,6 +124,30 @@ function applyExtraItem(pk, itemName, data) {
   // HP-boosting items (Health Charm, Power Weight) are handled by applyItemHpBonuses()
 }
 
+// Remove a specific held item from a Pokemon, updating both heldItem and heldItems.
+function removeHeldItem(pk, itemName) {
+  if (pk.heldItems && pk.heldItems.length > 0) {
+    var idx = pk.heldItems.indexOf(itemName);
+    if (idx !== -1) pk.heldItems.splice(idx, 1);
+    pk.heldItem = pk.heldItems.length > 0 ? pk.heldItems[0] : null;
+  } else {
+    if (pk.heldItem === itemName) pk.heldItem = null;
+  }
+}
+
+// Track a discarded held item in the owning player's discard pile.
+function trackDiscard(G, pk, itemName) {
+  if (!G || !itemName) return;
+  for (var pNum = 1; pNum <= 2; pNum++) {
+    var player = G.players[pNum];
+    if (!player.discardPile) player.discardPile = [];
+    if (player.active === pk) { player.discardPile.push(itemName); return; }
+    for (var i = 0; i < player.bench.length; i++) {
+      if (player.bench[i] === pk) { player.discardPile.push(itemName); return; }
+    }
+  }
+}
+
 // ============================================================
 // GAME STATE FACTORY
 // ============================================================
@@ -134,8 +158,8 @@ function createGame() {
     currentPlayer: 1,
     turn: 0,
     players: {
-      1: { name: 'Player 1', mana: 0, pokeMana: 25, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
-      2: { name: 'Player 2', mana: 0, pokeMana: 25, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH },
+      1: { name: 'Player 1', mana: 0, pokeMana: 30, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH, discardPile: [], koPool: [] },
+      2: { name: 'Player 2', mana: 0, pokeMana: 30, kos: 0, deck: [], hand: [], active: null, bench: [], usedAbilities: {}, ready: false, maxBench: Constants.MAX_BENCH, discardPile: [], koPool: [] },
     },
     log: [],
     events: [],
@@ -240,11 +264,11 @@ function startTurn(G) {
   _deps();
   G.events = G.events || [];
   var p = cp(G);
-  var oldMana = p.mana;
-  p.mana = Math.min(Constants.MAX_MANA, p.mana + Constants.MANA_PER_TURN);
-  var manaGained = p.mana - oldMana;
-  if (manaGained > 0) {
-    G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: manaGained });
+  var turnMana = (G.turn === 1) ? 1 : Constants.MANA_PER_TURN;
+  var manaResult = DamagePipeline.gainMana(G, G.currentPlayer, turnMana);
+  if (manaResult.gained > 0) {
+    G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: manaResult.gained });
+    for (var bri = 0; bri < manaResult.events.length; bri++) G.events.push(manaResult.events[bri]);
   }
   p.usedAbilities = {};
   G.selectedCard = { playerNum: G.currentPlayer, benchIdx: -1 };
@@ -281,12 +305,14 @@ function startTurn(G) {
 
   // Lum Berry auto-cure
   allPokemon.forEach(function(pk) {
-    if (pk.heldItem === 'Lum Berry' && !pk.heldItemUsed && pk.status && pk.status.length > 0) {
+    var pkItems = DamagePipeline.getHeldItems(pk);
+    if (pkItems.indexOf('Lum Berry') !== -1 && !pk.heldItemUsed && pk.status && pk.status.length > 0) {
       pk.status = [];
       pk.damage = Math.max(0, pk.damage - 30);
       pk.hp = pk.maxHp - pk.damage;
       pk.heldItemUsed = true;
-      pk.heldItem = null;
+      removeHeldItem(pk, 'Lum Berry');
+      trackDiscard(G, pk, 'Lum Berry');
       addLog(G, 'Lum Berry cures ' + pk.name + '! (Discarded)', 'heal');
       G.events.push({ type: 'item_proc', item: 'Lum Berry', pokemon: pk.name, effect: 'cureStatus', heal: 30, owner: G.currentPlayer });
     }
@@ -307,9 +333,12 @@ function endTurn(G) {
     if (d.ability && d.ability.key === 'aquaRing' && pk === p.active && !isPassiveBlocked(G, pk)) {
       var target = op(G).active;
       if (target && target.energy > 0 && target.heldItem !== 'Protect Goggles') {
-        target.energy = Math.max(0, target.energy - 1);
-        addLog(G, 'Freezing Winds strips 1 energy from ' + target.name, 'effect');
-        G.events.push({ type: 'ability_effect', ability: 'aquaRing', target: target.name, effect: 'stripEnergy' });
+        var fwResult = DamagePipeline.loseEnergy(G, target, 1);
+        G.events = G.events.concat(fwResult.events);
+        if (fwResult.actual > 0) {
+          addLog(G, 'Freezing Winds strips ' + fwResult.actual + ' energy from ' + target.name, 'effect');
+          G.events.push({ type: 'ability_effect', ability: 'aquaRing', target: target.name, effect: 'stripEnergy' });
+        }
       }
     }
   });
@@ -333,6 +362,19 @@ function endTurn(G) {
       G.events.push({ type: 'ability_effect', ability: 'sandStream', pokemon: pk.name });
     }
   });
+
+  // Honey Gather: if Active has this ability, gain 1 Mana at end of turn
+  if (p.active && p.active.hp > 0) {
+    var hgData = PokemonDB.getPokemonData(p.active.name);
+    if (hgData && hgData.ability && hgData.ability.key === 'honeyGather' && !isPassiveBlocked(G, p.active)) {
+      var hgResult = DamagePipeline.gainMana(G, G.currentPlayer, 1);
+      if (hgResult.gained > 0) {
+        addLog(G, 'Honey Gather: gained 1 Mana!', 'effect');
+        G.events.push({ type: 'ability_effect', ability: 'honeyGather', pokemon: p.active.name, effect: 'manaGain', amount: hgResult.gained, owner: G.currentPlayer });
+        for (var hgi = 0; hgi < hgResult.events.length; hgi++) G.events.push(hgResult.events[hgi]);
+      }
+    }
+  }
 
   // Sustained tracking
   if (p.active) {
@@ -397,12 +439,24 @@ function endTurn(G) {
 
     // Sleep: 50/50 cure
     if (pk.hp > 0 && pk.status.indexOf('sleep') !== -1) {
-      if (Math.random() < 0.5) {
-        pk.status = pk.status.filter(function(s) { return s !== 'sleep'; });
-        addLog(G, pk.name + ' woke up! (Heads)', 'info');
-        G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'sleep', reason: 'coinFlip', owner: side.pNum });
-      } else {
-        addLog(G, pk.name + ' is still Asleep! (Tails)', 'info');
+      // Nightmare: opponent's Darkrai deals 20 damage whenever this Pokemon flips to wake
+      var nightmareActive = _oppHasPassive(G, side.pNum, 'nightmare');
+      if (nightmareActive && pk.hp > 0) {
+        var nmResult = DamagePipeline.applyDamage(G, pk, 20, opp(side.pNum));
+        addLog(G, 'Nightmare deals 20 to ' + pk.name + '!', 'damage');
+        G.events.push({ type: 'ability_damage', ability: 'nightmare', target: pk.name, amount: 20, owner: opp(side.pNum) });
+        if (nmResult.ko) {
+          G.events = G.events.concat(nmResult.events.filter(function(e) { return e.type !== 'statusDamage'; }));
+        }
+      }
+      if (pk.hp > 0) {
+        if (Math.random() < 0.5) {
+          pk.status = pk.status.filter(function(s) { return s !== 'sleep'; });
+          addLog(G, pk.name + ' woke up! (Heads)', 'info');
+          G.events.push({ type: 'status_cure', pokemon: pk.name, status: 'sleep', reason: 'coinFlip', owner: side.pNum });
+        } else {
+          addLog(G, pk.name + ' is still Asleep! (Tails)', 'info');
+        }
       }
     }
   }
@@ -547,11 +601,18 @@ function doAttack(G, attackIndex, actionOpts) {
     return false;
   }
 
+  // Team-wide lock: Radiant Resurrection (once per game for entire team)
+  if (attack.fx && attack.fx.indexOf('radiantResurrection') !== -1 && cp(G).usedRadiantResurrection) {
+    addLog(G, 'Radiant Resurrection already used this game!', 'info');
+    return false;
+  }
+
   // Consume Quick Claw
   if (attacker.quickClawActive) {
     attacker.quickClawActive = false;
     attacker.heldItemUsed = true;
-    attacker.heldItem = null;
+    removeHeldItem(attacker, 'Quick Claw');
+    trackDiscard(G, attacker, 'Quick Claw');
     addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
     G.events.push({ type: 'item_proc', item: 'Quick Claw', pokemon: attacker.name, effect: 'costReduction' });
   }
@@ -617,11 +678,18 @@ function doBenchAttack(G, benchIdx, attackIndex, actionOpts) {
     return false;
   }
 
+  // Team-wide lock: Radiant Resurrection (once per game for entire team)
+  if (attack.fx && attack.fx.indexOf('radiantResurrection') !== -1 && cp(G).usedRadiantResurrection) {
+    addLog(G, 'Radiant Resurrection already used this game!', 'info');
+    return false;
+  }
+
   // Consume Quick Claw
   if (attacker.quickClawActive) {
     attacker.quickClawActive = false;
     attacker.heldItemUsed = true;
-    attacker.heldItem = null;
+    removeHeldItem(attacker, 'Quick Claw');
+    trackDiscard(G, attacker, 'Quick Claw');
     addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
     G.events.push({ type: 'item_proc', item: 'Quick Claw', pokemon: attacker.name, effect: 'costReduction' });
   }
@@ -675,11 +743,18 @@ function doCopiedAttack(G, sourceName, attackIndex, actionOpts) {
     return false;
   }
 
+  // Team-wide lock: Radiant Resurrection (once per game for entire team)
+  if (attack.fx && attack.fx.indexOf('radiantResurrection') !== -1 && cp(G).usedRadiantResurrection) {
+    addLog(G, 'Radiant Resurrection already used this game!', 'info');
+    return false;
+  }
+
   // Consume Quick Claw
   if (attacker.quickClawActive) {
     attacker.quickClawActive = false;
     attacker.heldItemUsed = true;
-    attacker.heldItem = null;
+    removeHeldItem(attacker, 'Quick Claw');
+    trackDiscard(G, attacker, 'Quick Claw');
     addLog(G, 'Quick Claw activated! (Discarded)', 'effect');
     G.events.push({ type: 'item_proc', item: 'Quick Claw', pokemon: attacker.name, effect: 'costReduction' });
   }
@@ -734,6 +809,41 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
     }
   }
 
+  // Radiant Resurrection: revive up to 3 KO'd Pokemon from koPool (once per game, team-wide)
+  if (fx.indexOf('radiantResurrection') !== -1) {
+    var rp = cp(G);
+    if (rp.usedRadiantResurrection) {
+      addLog(G, 'Radiant Resurrection has already been used this game!', 'info');
+      return;
+    }
+    var koPool = rp.koPool || [];
+    var maxBench = rp.maxBench || Constants.MAX_BENCH;
+    var benchSpace = maxBench - rp.bench.length;
+    var validRevives = [];
+    for (var kri = 0; kri < koPool.length; kri++) {
+      var krData = PokemonDB.getPokemonData(koPool[kri]);
+      if (krData.cost <= attacker.energy) {
+        validRevives.push({ pokemonName: koPool[kri], cost: krData.cost });
+      }
+    }
+    if (validRevives.length > 0 && benchSpace > 0) {
+      var maxPicks = Math.min(3, benchSpace, validRevives.length);
+      G.targeting = {
+        type: 'resurrect',
+        validTargets: validRevives,
+        attackInfo: { sourceType: 'attack', type: 'resurrect', attacker: attacker, maxSelections: maxPicks, currentSelections: 0 }
+      };
+      addLog(G, 'Radiant Resurrection: choose up to ' + maxPicks + ' Pokemon to revive!', 'effect');
+      G.events.push({ type: 'attack_targeting', attack: 'Radiant Resurrection' });
+    } else {
+      addLog(G, 'Radiant Resurrection: no valid targets to revive!', 'info');
+    }
+    // Player-wide lock — no one on this team can use it again
+    rp.usedRadiantResurrection = true;
+    finalizeAttack(G, attacker);
+    return;
+  }
+
   if (!defender) return;
 
   // Poltergeist: does nothing if defender has no held item
@@ -748,7 +858,7 @@ function executeAttack(G, attacker, attack, attackerTypes, fx, p, useOptBoost, a
   }
 
   // Main damage
-  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleBench|scaleBenchAll|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
+  var needsDmg = effectiveAttack.baseDmg > 0 || /berserk|scaleDef|scaleBoth|scaleOwn|scaleCost|scaleBench|scaleBenchAll|sustained|bonusDmg|fullHpBonus|payback|scaleDefNeg/.test(fx);
   if (needsDmg) {
     var damageResult = DamagePipeline.dealAttackDamage(G, attacker, defender, effectiveAttack, attackerTypes, oppPlayerNum, { attackSeq: attackSeq });
     G.events = G.events.concat(damageResult.events);
@@ -796,12 +906,11 @@ function finalizeAttack(G, attacker) {
     }
     // Time Dilation: lose 2 energy whenever this Pokemon attacks
     if (atkData && atkData.ability && atkData.ability.key === 'timeDilation') {
-      var beforeE = attacker.energy;
-      attacker.energy = Math.max(0, attacker.energy - 2);
-      var lost = beforeE - attacker.energy;
-      if (lost > 0) {
-        addLog(G, 'Time Dilation: ' + attacker.name + ' lost ' + lost + ' energy!', 'effect');
-        G.events.push({ type: 'selfEnergyLoss', pokemon: attacker.name, amount: lost, source: 'timeDilation', owner: G.currentPlayer });
+      var tdResult = DamagePipeline.loseEnergy(G, attacker, 2);
+      G.events = G.events.concat(tdResult.events);
+      if (tdResult.actual > 0) {
+        addLog(G, 'Time Dilation: ' + attacker.name + ' lost ' + tdResult.actual + ' energy!', 'effect');
+        G.events.push({ type: 'selfEnergyLoss', pokemon: attacker.name, amount: tdResult.actual, source: 'timeDilation', owner: G.currentPlayer });
       }
     }
   }
@@ -897,19 +1006,9 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     if (targetPlayer === G.currentPlayer) return false;
     var stripAmount = info.amount || 0;
     if (stripAmount <= 0) return false;
-    var actualStrip = Math.min(stripAmount, targetPk.energy);
-    // White Herb protection
-    var allStripItems = DamagePipeline.getHeldItems(targetPk);
-    if (allStripItems.indexOf('White Herb') !== -1 && !targetPk.heldItemUsed) {
-      var whPrevented = Math.min(actualStrip, 2);
-      actualStrip = Math.max(0, actualStrip - whPrevented);
-      targetPk.heldItemUsed = true;
-      if (targetPk.heldItem === 'White Herb') targetPk.heldItem = null;
-      if (targetPk.heldItems) { var whIdx = targetPk.heldItems.indexOf('White Herb'); if (whIdx !== -1) targetPk.heldItems.splice(whIdx, 1); }
-      G.events.push({ type: 'itemProc', item: 'White Herb', pokemon: targetPk.name, effect: 'preventEnergyLoss', prevented: whPrevented });
-    }
-    targetPk.energy = Math.max(0, targetPk.energy - actualStrip);
-    G.events.push({ type: 'energyStrip', pokemon: targetPk.name, amount: actualStrip, source: 'anyStrip', targetOwner: targetPlayer });
+    var asResult = DamagePipeline.loseEnergy(G, targetPk, stripAmount);
+    G.events = G.events.concat(asResult.events);
+    G.events.push({ type: 'energyStrip', pokemon: targetPk.name, amount: asResult.actual, source: 'anyStrip', targetOwner: targetPlayer });
 
     var anyStripFx = (info.attack && info.attack.fx) || '';
     var anyStripRemainFx = anyStripFx.replace(/anyStrip:\d+/, '').trim();
@@ -1004,6 +1103,34 @@ function doSelectTarget(G, targetPlayer, targetBenchIdx) {
     return true;
   }
 
+  // Pollen Puff: opp Pokemon = 50 damage, own Pokemon = heal 50
+  if (info.type === 'pollenPuff') {
+    if (targetPlayer !== G.currentPlayer) {
+      // Opponent's Pokemon: deal 50 damage
+      var ppAtk = { baseDmg: 50, fx: '' };
+      var ppResult = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, ppAtk, info.attackerTypes, targetPlayer, {
+        attackSeq: info.attackSeq
+      });
+      G.events = G.events.concat(ppResult.events);
+      if (ppResult.result.mult > 1) addLog(G, 'Super Effective!', 'effect');
+      if (ppResult.result.mult < 1) addLog(G, 'Not very effective...', 'info');
+      addLog(G, ppResult.result.damage + ' Pollen Puff damage to ' + targetPk.name, 'damage');
+    } else {
+      // Own Pokemon: heal 50
+      var healAmt = Math.min(50, targetPk.damage);
+      if (healAmt > 0) {
+        targetPk.damage -= healAmt;
+        targetPk.hp = targetPk.maxHp - targetPk.damage;
+        addLog(G, 'Pollen Puff heals ' + healAmt + ' from ' + targetPk.name + '!', 'heal');
+        G.events.push({ type: 'heal', pokemon: targetPk.name, amount: healAmt, owner: G.currentPlayer });
+      } else {
+        addLog(G, targetPk.name + ' is already at full HP!', 'info');
+      }
+    }
+    finalizeAttack(G, info.attacker);
+    return true;
+  }
+
   // Calculate damage on target
   var sniperAtk = { baseDmg: info.baseDmg, fx: '' };
   var result = DamagePipeline.dealAttackDamage(G, info.attacker, targetPk, sniperAtk, info.attackerTypes, targetPlayer, {
@@ -1090,10 +1217,11 @@ function doQuickRetreat(G) {
 
   if (isBlockedByBlockade(G, p.active)) return false;
 
-  p.active.energy -= cost;
+  var retreatResult = DamagePipeline.loseEnergy(G, p.active, cost);
+  G.events = G.events.concat(retreatResult.events);
   G.pendingRetreats.push({ player: G.currentPlayer, reason: 'quick' });
-  addLog(G, 'Quick Retreat (' + cost + ' energy)', 'info');
-  G.events.push({ type: 'retreat_pending', player: G.currentPlayer, cost: cost });
+  addLog(G, 'Quick Retreat (' + retreatResult.actual + ' energy)', 'info');
+  G.events.push({ type: 'retreat_pending', player: G.currentPlayer, cost: retreatResult.actual });
   return true;
 }
 
@@ -1122,13 +1250,17 @@ function doSelectBenchForRetreat(G, benchIdx, playerNum) {
     }
     p.bench.push(p.active);
   }
-  if (oldActiveCard && oldActiveCard.heldItem) {
-    var retreatItem = ItemDB.runItemHook('onRetreat', oldActiveCard.heldItem, { holder: oldActiveCard, reason: pr.reason });
-    if (retreatItem && retreatItem.discard) {
-      addLog(G, oldActiveCard.heldItem + ' was discarded from ' + oldActiveCard.name + ' on retreat!', 'info');
-      G.events.push({ type: 'itemProc', item: oldActiveCard.heldItem, pokemon: oldActiveCard.name, effect: 'discardOnRetreat' });
-      oldActiveCard.heldItemUsed = true;
-      oldActiveCard.heldItem = null;
+  if (oldActiveCard) {
+    var retreatItems = DamagePipeline.getHeldItems(oldActiveCard);
+    for (var ri = 0; ri < retreatItems.length; ri++) {
+      var retreatItem = ItemDB.runItemHook('onRetreat', retreatItems[ri], { holder: oldActiveCard, reason: pr.reason });
+      if (retreatItem && retreatItem.discard) {
+        addLog(G, retreatItems[ri] + ' was discarded from ' + oldActiveCard.name + ' on retreat!', 'info');
+        G.events.push({ type: 'itemProc', item: retreatItems[ri], pokemon: oldActiveCard.name, effect: 'discardOnRetreat' });
+        oldActiveCard.heldItemUsed = true;
+        removeHeldItem(oldActiveCard, retreatItems[ri]);
+        trackDiscard(G, oldActiveCard, retreatItems[ri]);
+      }
     }
   }
 
@@ -1196,7 +1328,9 @@ function doPlayPokemon(G, handIdx, itemHandIdx, extraItemIndices) {
   var card = p.hand[handIdx];
   if (!card || card.type !== 'pokemon') return false;
   var data = PokemonDB.getPokemonData(card.name);
-  if (p.mana < data.cost || p.pokeMana < data.cost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
+  var manaCost = data.cost;
+  var pokeCost = data.shiny ? data.cost * 2 : data.cost;
+  if (p.mana < manaCost || p.pokeMana < pokeCost || p.bench.length >= (p.maxBench || Constants.MAX_BENCH)) return false;
 
   var heldItem = card.heldItem || null;
   // Collect all indices to remove (sorted descending so splicing doesn't shift)
@@ -1230,8 +1364,8 @@ function doPlayPokemon(G, handIdx, itemHandIdx, extraItemIndices) {
     p.hand.splice(indicesToRemove[ri], 1);
   }
 
-  p.mana -= data.cost;
-  p.pokeMana -= data.cost;
+  p.mana -= manaCost;
+  p.pokeMana -= pokeCost;
   var pk = makePokemon(card.name, heldItem);
 
   // Apply extra Keyring items
@@ -1253,10 +1387,12 @@ function doPlayPokemon(G, handIdx, itemHandIdx, extraItemIndices) {
   if (data.ability && data.ability.key === 'soulDrain' && data.ability.type === 'onPlay') {
     var oppActive = op(G).active;
     if (oppActive && oppActive.energy > 0 && oppActive.heldItem !== 'Protect Goggles') {
-      var stripped = Math.min(2, oppActive.energy);
-      oppActive.energy -= stripped;
-      addLog(G, 'Draining Vessel strips ' + stripped + ' energy from ' + oppActive.name + '!', 'effect');
-      G.events.push({ type: 'ability_effect', ability: 'soulDrain', target: oppActive.name, stripped: stripped });
+      var sdResult = DamagePipeline.loseEnergy(G, oppActive, 2);
+      G.events = G.events.concat(sdResult.events);
+      if (sdResult.actual > 0) {
+        addLog(G, 'Draining Vessel strips ' + sdResult.actual + ' energy from ' + oppActive.name + '!', 'effect');
+        G.events.push({ type: 'ability_effect', ability: 'soulDrain', target: oppActive.name, stripped: sdResult.actual });
+      }
     }
   }
 
@@ -1295,10 +1431,12 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
   switch (key) {
     case 'creation': // Arceus: spend 1 mana, gain 2
       if (p.mana < 1) return false;
-      p.mana = Math.min(Constants.MAX_MANA, p.mana + 1); // net +1 (spend 1, gain 2)
+      p.mana--; // spend 1
+      var creationResult = DamagePipeline.gainMana(G, G.currentPlayer, 2);
       p.usedAbilities[key] = true;
       addLog(G, 'Creation: +2 mana (spent 1)', 'effect');
       G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name });
+      for (var cri = 0; cri < creationResult.events.length; cri++) G.events.push(creationResult.events[cri]);
       break;
 
     case 'softTouch': // Chansey: heal 10 from any (need target selection)
@@ -1419,14 +1557,18 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
     case 'brilliantShining': // Espeon: both players +1 mana
       p.usedAbilities[key] = true;
-      var myBefore = p.mana;
-      var oppBefore = op(G).mana;
-      p.mana = Math.min(Constants.MAX_MANA, p.mana + 1);
-      op(G).mana = Math.min(Constants.MAX_MANA, op(G).mana + 1);
+      var bsMyResult = DamagePipeline.gainMana(G, G.currentPlayer, 1);
+      var bsOppResult = DamagePipeline.gainMana(G, opp(G.currentPlayer), 1);
       addLog(G, 'Brilliant Shining: both players gain 1 mana!', 'effect');
-      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, myGain: p.mana - myBefore, oppGain: op(G).mana - oppBefore });
-      if (p.mana > myBefore) G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: p.mana - myBefore });
-      if (op(G).mana > oppBefore) G.events.push({ type: 'mana_gain', player: opp(G.currentPlayer), amount: op(G).mana - oppBefore });
+      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, myGain: bsMyResult.gained, oppGain: bsOppResult.gained });
+      if (bsMyResult.gained > 0) {
+        G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: bsMyResult.gained });
+        for (var bsi = 0; bsi < bsMyResult.events.length; bsi++) G.events.push(bsMyResult.events[bsi]);
+      }
+      if (bsOppResult.gained > 0) {
+        G.events.push({ type: 'mana_gain', player: opp(G.currentPlayer), amount: bsOppResult.gained });
+        for (var bsj = 0; bsj < bsOppResult.events.length; bsj++) G.events.push(bsOppResult.events[bsj]);
+      }
       break;
 
     case 'hiddenPower': // Unown: active +1 energy, turn ends
@@ -1443,14 +1585,13 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
 
     case 'gutsyGenerator': // Tyrogue: if damaged, gain 1 mana then end turn
       if (pk.damage <= 0) return false;
-      var prevMana = p.mana;
-      p.mana = Math.min(Constants.MAX_MANA, p.mana + 1);
-      var manaGain = p.mana - prevMana;
-      if (manaGain <= 0) return false;
+      var gutsyResult = DamagePipeline.gainMana(G, G.currentPlayer, 1);
+      if (gutsyResult.gained <= 0) return false;
       p.usedAbilities[key] = true;
-      addLog(G, 'Gutsy Generator: +' + manaGain + ' mana. Turn ends.', 'effect');
-      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: manaGain });
-      G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: manaGain });
+      addLog(G, 'Gutsy Generator: +' + gutsyResult.gained + ' mana. Turn ends.', 'effect');
+      G.events.push({ type: 'ability_effect', ability: key, pokemon: pk.name, amount: gutsyResult.gained });
+      G.events.push({ type: 'mana_gain', player: G.currentPlayer, amount: gutsyResult.gained });
+      for (var ggi = 0; ggi < gutsyResult.events.length; ggi++) G.events.push(gutsyResult.events[ggi]);
       endTurn(G);
       break;
 
@@ -1534,6 +1675,59 @@ function doUseAbility(G, abilityKey, sourceBenchIdx) {
       G.events.push({ type: 'ability_targeting', ability: key });
       break;
 
+    case 'superMagnet': // Magneton: 1 mana, steal all items from any Pokemon
+      if (p.mana < 1) return false;
+      p.mana--;
+      p.usedAbilities[key] = true;
+      var smTargets = [];
+      [G.currentPlayer, opp(G.currentPlayer)].forEach(function(pNum) {
+        var side = G.players[pNum];
+        if (side.active && side.active !== pk && (side.active.heldItem || (side.active.heldItems && side.active.heldItems.length > 0))) {
+          smTargets.push({ player: pNum, idx: -1, pk: side.active });
+        }
+        side.bench.forEach(function(bpk, bi) {
+          if (bpk && (bpk.heldItem || (bpk.heldItems && bpk.heldItems.length > 0))) {
+            smTargets.push({ player: pNum, idx: bi, pk: bpk });
+          }
+        });
+      });
+      if (smTargets.length === 0) { addLog(G, 'No Pokemon have Held Items!', 'info'); return true; }
+      G.targeting = {
+        type: 'superMagnet', validTargets: smTargets,
+        attackInfo: { sourceType: 'ability', type: 'superMagnet', attacker: pk }
+      };
+      addLog(G, 'Super Magnet: choose a Pokemon to steal items from!', 'effect');
+      G.events.push({ type: 'ability_targeting', ability: key });
+      break;
+
+    case 'recycle': // Munchlax: attach item from discard pile (must have no held item)
+      if (pk.heldItem || (pk.heldItems && pk.heldItems.length > 0)) {
+        addLog(G, pk.name + ' already has a Held Item!', 'info');
+        return false;
+      }
+      if (!p.discardPile || p.discardPile.length === 0) {
+        addLog(G, 'No items in discard pile!', 'info');
+        return false;
+      }
+      p.usedAbilities[key] = true;
+      // Build unique item list from discard pile as valid targets
+      var recycleItems = [];
+      var seen = {};
+      for (var ri = 0; ri < p.discardPile.length; ri++) {
+        if (!seen[p.discardPile[ri]]) {
+          seen[p.discardPile[ri]] = true;
+          recycleItems.push(p.discardPile[ri]);
+        }
+      }
+      G.targeting = {
+        type: 'recycle',
+        validTargets: recycleItems.map(function(item) { return { itemName: item }; }),
+        attackInfo: { sourceType: 'ability', type: 'recycle', attacker: pk }
+      };
+      addLog(G, 'Recycle: choose an item from your discard pile!', 'effect');
+      G.events.push({ type: 'ability_targeting', ability: key });
+      break;
+
     case 'electroCharge': // Jolteon: active +1 energy (1/turn)
       if (pk !== p.active) return false;
       if (pk.energy >= Constants.MAX_ENERGY) return false;
@@ -1582,30 +1776,102 @@ function doDiscardItem(G, slot, benchIdx, itemName) {
   var p = cp(G);
   var pk = slot === 'active' ? p.active : p.bench[benchIdx];
   if (!pk) return false;
-  // If itemName specified, discard that specific item from heldItems array
-  if (itemName && pk.heldItems && pk.heldItems.length > 0) {
-    var idx = pk.heldItems.indexOf(itemName);
-    if (idx === -1) return false;
-    pk.heldItems.splice(idx, 1);
-    addLog(G, 'Discarded ' + itemName + ' from ' + pk.name, 'info');
-    G.events.push({ type: 'discard_item', pokemon: pk.name, item: itemName });
-    // If this was also the primary heldItem, update it
-    if (pk.heldItem === itemName) {
-      pk.heldItem = pk.heldItems.length > 0 ? pk.heldItems[0] : null;
+  var toDiscard = itemName || pk.heldItem;
+  if (!toDiscard) return false;
+  var allItems = DamagePipeline.getHeldItems(pk);
+  if (allItems.indexOf(toDiscard) === -1) return false;
+  removeHeldItem(pk, toDiscard);
+  trackDiscard(G, pk, toDiscard);
+  addLog(G, 'Discarded ' + toDiscard + ' from ' + pk.name, 'info');
+  G.events.push({ type: 'discard_item', pokemon: pk.name, item: toDiscard });
+  return true;
+}
+
+// --- Recycle Select (pick item from discard pile) ---
+function doRecycleSelect(G, itemName) {
+  if (!G.targeting || G.targeting.type !== 'recycle') return false;
+  var p = cp(G);
+  var valid = G.targeting.validTargets.some(function(t) { return t.itemName === itemName; });
+  if (!valid) return false;
+  var pk = G.targeting.attackInfo.attacker;
+  // Find the live reference (attacker may be stale after serialization)
+  var livePk = null;
+  if (p.active && p.active.name === pk.name) livePk = p.active;
+  if (!livePk) {
+    for (var bi = 0; bi < p.bench.length; bi++) {
+      if (p.bench[bi] === pk || p.bench[bi].name === pk.name) { livePk = p.bench[bi]; break; }
     }
-    return true;
   }
-  // Default: discard primary heldItem
-  if (!pk.heldItem) return false;
-  var discarded = pk.heldItem;
-  addLog(G, 'Discarded ' + discarded + ' from ' + pk.name, 'info');
-  G.events.push({ type: 'discard_item', pokemon: pk.name, item: discarded });
-  pk.heldItem = null;
-  if (pk.heldItems) {
-    var hIdx = pk.heldItems.indexOf(discarded);
-    if (hIdx !== -1) pk.heldItems.splice(hIdx, 1);
-    if (pk.heldItems.length > 0) pk.heldItem = pk.heldItems[0];
+  if (!livePk) return false;
+  G.targeting = null;
+
+  // Remove item from discard pile
+  var idx = p.discardPile.indexOf(itemName);
+  if (idx === -1) return false;
+  p.discardPile.splice(idx, 1);
+
+  // Attach to pokemon
+  livePk.heldItem = itemName;
+  livePk.heldItems = [itemName];
+  livePk.heldItemUsed = false;
+  applyExtraItem(livePk, itemName, PokemonDB.getPokemonData(livePk.name));
+
+  addLog(G, 'Recycle: ' + livePk.name + ' attached ' + itemName + ' from discard pile!', 'effect');
+  G.events.push({ type: 'ability_effect', ability: 'recycle', pokemon: livePk.name, item: itemName });
+  return true;
+}
+
+// --- Resurrect Select (pick KO'd Pokemon from koPool) ---
+function doResurrectSelect(G, pokemonName) {
+  if (!G.targeting || G.targeting.type !== 'resurrect') return false;
+  var p = cp(G);
+  var valid = G.targeting.validTargets.some(function(t) { return t.pokemonName === pokemonName; });
+  if (!valid) return false;
+  var maxBench = p.maxBench || Constants.MAX_BENCH;
+  if (p.bench.length >= maxBench) return false;
+
+  // Remove from koPool
+  var idx = p.koPool.indexOf(pokemonName);
+  if (idx === -1) return false;
+  p.koPool.splice(idx, 1);
+
+  // Create fresh Pokemon and add to bench
+  var revived = makePokemon(pokemonName, null);
+  p.bench.push(revived);
+  addLog(G, 'Radiant Resurrection revived ' + pokemonName + '!', 'effect');
+  G.events.push({ type: 'resurrect', pokemon: pokemonName, owner: G.currentPlayer });
+
+  // Update targeting state
+  G.targeting.attackInfo.currentSelections++;
+  var remaining = G.targeting.attackInfo.maxSelections - G.targeting.attackInfo.currentSelections;
+  var benchLeft = maxBench - p.bench.length;
+
+  // Rebuild valid targets (remove the selected one, recheck cost against attacker energy)
+  var attacker = G.targeting.attackInfo.attacker;
+  var newValidTargets = [];
+  for (var kri = 0; kri < p.koPool.length; kri++) {
+    var krData = PokemonDB.getPokemonData(p.koPool[kri]);
+    if (krData.cost <= attacker.energy) {
+      newValidTargets.push({ pokemonName: p.koPool[kri], cost: krData.cost });
+    }
   }
+  G.targeting.validTargets = newValidTargets;
+
+  // Check if done (max reached, bench full, or no more valid targets)
+  if (remaining <= 0 || benchLeft <= 0 || newValidTargets.length === 0) {
+    G.targeting = null;
+    addLog(G, 'Radiant Resurrection complete!', 'effect');
+    endTurn(G);
+  }
+
+  return true;
+}
+
+function doResurrectDone(G) {
+  if (!G.targeting || G.targeting.type !== 'resurrect') return false;
+  G.targeting = null;
+  addLog(G, 'Radiant Resurrection complete!', 'effect');
+  endTurn(G);
   return true;
 }
 
@@ -1783,6 +2049,41 @@ function doAbilityTarget(G, targetPlayer, targetBenchIdx) {
         G.events = G.events.concat(technoKo);
       }
       break;
+
+    case 'superMagnet':
+      // Steal ALL held items from target and give them to Magneton
+      // Look up Magneton from live game state (not info.attacker which may be a stale copy)
+      var smHolder = cp(G).active;
+      if (!smHolder) return false;
+      var stolenItems = DamagePipeline.getHeldItems(targetPk);
+      if (stolenItems.length === 0) return false;
+
+      // Build Magneton's new item list (existing + stolen)
+      var magnetonItems = DamagePipeline.getHeldItems(smHolder);
+      var newItems = magnetonItems.concat(stolenItems);
+      smHolder.heldItem = newItems[0];
+      smHolder.heldItems = newItems;
+
+      // Apply stat-granting effects for each stolen item
+      var smData = PokemonDB.getPokemonData(smHolder.name);
+      for (var si = 0; si < stolenItems.length; si++) {
+        applyExtraItem(smHolder, stolenItems[si], smData);
+      }
+
+      // Clear all items from target
+      targetPk.heldItem = null;
+      targetPk.heldItems = null;
+      targetPk.quickClawActive = false;
+
+      // Update Quick Claw on Magneton if it got one
+      if (stolenItems.indexOf('Quick Claw') !== -1) {
+        smHolder.quickClawActive = true;
+      }
+
+      var stolenLabel = stolenItems.join(', ');
+      addLog(G, 'Super Magnet: ' + smHolder.name + ' stole ' + stolenLabel + ' from ' + targetPk.name + '!', 'effect');
+      G.events.push({ type: 'ability_effect', ability: 'superMagnet', source: smHolder.name, target: targetPk.name, items: stolenItems, owner: targetPlayer });
+      break;
   }
 
   return true;
@@ -1848,10 +2149,11 @@ function processSetupChoice(G, playerNum, choices) {
     }
 
     var pokData = PokemonDB.getPokemonData(card.name);
-    var cost = pokData ? pokData.cost : 0;
-    if (p.mana < cost || p.pokeMana < cost) return false;
-    p.mana -= cost;
-    p.pokeMana -= cost;
+    var manaCost = pokData ? pokData.cost : 0;
+    var pokeCost = (pokData && pokData.shiny) ? pokData.cost * 2 : manaCost;
+    if (p.mana < manaCost || p.pokeMana < pokeCost) return false;
+    p.mana -= manaCost;
+    p.pokeMana -= pokeCost;
 
     p.active = makePokemon(card.name, heldItem);
     runOnPlayAbility(G, playerNum, p.active);
@@ -1891,8 +2193,9 @@ function processSetupChoice(G, playerNum, choices) {
       if (!bcard || bcard.type !== 'pokemon') return;
 
       var bPokData = PokemonDB.getPokemonData(bcard.name);
-      var bCost = bPokData ? bPokData.cost : 0;
-      if (p.mana < bCost || p.pokeMana < bCost) return;
+      var bManaCost = bPokData ? bPokData.cost : 0;
+      var bPokeCost = (bPokData && bPokData.shiny) ? bPokData.cost * 2 : bManaCost;
+      if (p.mana < bManaCost || p.pokeMana < bPokeCost) return;
 
       var itemIdx = sel.itemIdx;
       var bHeldItem = null;
@@ -1903,8 +2206,8 @@ function processSetupChoice(G, playerNum, choices) {
         }
       }
 
-      p.mana -= bCost;
-      p.pokeMana -= bCost;
+      p.mana -= bManaCost;
+      p.pokeMana -= bPokeCost;
       var setupPk = makePokemon(bcard.name, bHeldItem);
       p.bench.push(setupPk);
       runOnPlayAbility(G, playerNum, setupPk);
@@ -1966,6 +2269,25 @@ function processAction(G, playerNum, action) {
     // Attack targets (snipe, sniperBench, swarmSnipe, selfBenchDmg, anyStrip, multiTarget, benchEnergy)
     if (G.currentPlayer !== playerNum) return finish(false);
     return finish(doSelectTarget(G, action.targetPlayer, action.targetBenchIdx));
+  }
+
+  // Recycle item selection (from discard pile)
+  if (action.type === 'recycleSelect') {
+    if (!G.targeting || G.targeting.type !== 'recycle') return finish(false);
+    if (G.currentPlayer !== playerNum) return finish(false);
+    return finish(doRecycleSelect(G, action.itemName));
+  }
+
+  // Resurrect selection (pick KO'd Pokemon from koPool)
+  if (action.type === 'resurrectSelect') {
+    if (!G.targeting || G.targeting.type !== 'resurrect') return finish(false);
+    if (G.currentPlayer !== playerNum) return finish(false);
+    return finish(doResurrectSelect(G, action.pokemonName));
+  }
+  if (action.type === 'resurrectDone') {
+    if (!G.targeting || G.targeting.type !== 'resurrect') return finish(false);
+    if (G.currentPlayer !== playerNum) return finish(false);
+    return finish(doResurrectDone(G));
   }
 
   // All other actions require being current player in battle phase

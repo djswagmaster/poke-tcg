@@ -52,6 +52,14 @@ var POKEMON_DB = [
     attacks:[{name:"Sludge Slap",energy:2,baseDmg:20,desc:"Poison",fx:"poison"},
              {name:"Muddy Crash",energy:4,baseDmg:100,desc:"Lose 1 energy",fx:"selfEnergyLoss:1"}]},
 
+  {name:"Cresselia",types:["Psychic"],cost:5,hp:300,
+    ability:{name:"Blessing",desc:"When you gain Mana, heal 10 per Mana gained",type:"passive",key:"blessing"},
+    attacks:[{name:"Moonblast",energy:3,baseDmg:80,desc:"",fx:""}]},
+
+  {name:"Darkrai",types:["Dark"],cost:5,hp:220,
+    ability:{name:"Nightmare",desc:"When opp flips to wake from Sleep, deal 20 damage",type:"passive",key:"nightmare"},
+    attacks:[{name:"Dark Void",energy:3,baseDmg:100,desc:"Defending Pokemon falls Asleep",fx:"sleep"}]},
+
   {name:"Delibird",types:["Ice","Flying"],cost:2,hp:120,weakness:["Fire"],resistance:["Ground"],
     attacks:[{name:"Gift Delivery",energy:2,baseDmg:0,desc:"Each bench +1 energy",fx:"benchEnergyAll"}]},
 
@@ -83,6 +91,9 @@ var POKEMON_DB = [
     attacks:[{name:"Dragon Tail",energy:1,baseDmg:60,desc:"Opp switches Active",fx:"forceSwitch"},
              {name:"Super Dusty Flapping",energy:3,baseDmg:100,desc:"+10 to all benches",fx:"benchAll:10"}]},
 
+  {name:"Garbodor",types:["Poison"],cost:4,hp:230,
+    attacks:[{name:"Trash Heap",energy:3,baseDmg:70,desc:"+10 damage per discarded Held Item",fx:"trashHeap"}]},
+
   {name:"Galarian Weezing",types:["Poison","Fairy"],cost:4,hp:210,weakness:["Fire","Psychic"],resistance:["Grass","Water"],
     ability:{name:"Neutralizing Gas",desc:"Prevent all Active abilities",type:"passive",key:"neutralizingGas"},
     attacks:[{name:"Smog",energy:2,baseDmg:20,desc:"Poison",fx:"poison"}]},
@@ -102,6 +113,10 @@ var POKEMON_DB = [
   {name:"Golisopod",types:["Bug","Water"],cost:4,hp:260,weakness:["Electric"],resistance:["Fighting"],
     attacks:[{name:"U-Turn",energy:1,baseDmg:50,desc:"Forced self-retreat",fx:"selfRetreat"},
              {name:"Aqua Lunge",energy:3,baseDmg:100,desc:"Can't use next turn",fx:"lockAttack"}]},
+
+  {name:"Golurk",types:["Ground","Ghost"],cost:4,hp:230,
+    attacks:[{name:"Ancient Punch",energy:2,baseDmg:40,desc:"+10 per defender's Mana cost",fx:"scaleCost:10"},
+             {name:"Megaton Crash",energy:4,baseDmg:200,desc:"100 to self",fx:"selfDmg:100"}]},
 
   {name:"Gothorita",types:["Psychic"],cost:3,hp:210,weakness:["Dark"],resistance:["Fighting"],
     attacks:[{name:"Mad Party",energy:2,baseDmg:0,desc:"10 per Pokemon in play",fx:"madParty"}]},
@@ -124,6 +139,9 @@ var POKEMON_DB = [
   {name:"Hitmontop",types:["Fighting"],cost:4,hp:250,weakness:["Psychic"],resistance:["Flying"],
     attacks:[{name:"Flying Spinkick",energy:2,baseDmg:50,desc:"+30 to bench",fx:"sniperBench:30"}]},
 
+  {name:"Shiny Ho-oh",types:["Fire","Flying"],cost:6,hp:300,shiny:true,
+    attacks:[{name:"Radiant Resurrection",energy:1,baseDmg:0,desc:"Revive up to 3 KO'd Pokemon (cost ≤ your energy). Once per game.",fx:"radiantResurrection"}]},
+
   {name:"Jolteon",types:["Electric"],cost:4,hp:200,weakness:["Ground"],resistance:["Steel"],
     ability:{name:"Electro Charge",desc:"Once during your turn, if this is your Active Pokemon, grant this Pokemon +1 Energy",type:"active",key:"electroCharge",activeOnly:true},
     attacks:[{name:"Thunderbolt",energy:3,baseDmg:70,desc:"May do +70 damage. If you do, this Pokemon loses 2 energy",fx:"optBoost:70:2"}]},
@@ -131,6 +149,10 @@ var POKEMON_DB = [
   {name:"Vaporeon",types:["Water"],cost:4,hp:240,weakness:["Electric"],resistance:["Fire"],
     ability:{name:"Bubble Cleanse",desc:"As often as you like during your turn, spend 1 energy to heal 30 from this Pokemon",type:"active",key:"bubbleCleanse"},
     attacks:[{name:"Hydro Splash",energy:3,baseDmg:80,desc:"",fx:""}]},
+
+  {name:"Lapras",types:["Water","Ice"],cost:4,hp:250,
+    attacks:[{name:"Hydro Pump",energy:1,baseDmg:10,desc:"+20 per own energy",fx:"scaleOwn:20"},
+             {name:"Perishing Cold",energy:4,baseDmg:0,desc:"KO both Active Pokemon",fx:"perishingCold"}]},
 
   {name:"Leafeon",types:["Grass"],cost:4,hp:220,weakness:["Bug"],resistance:["Water"],
     ability:{name:"Leaf Boost",desc:"Once during your turn, grant 1 of your Pokemon +1 energy. If you do, your turn ends",type:"active",key:"leafBoost",targeted:true},
@@ -183,6 +205,10 @@ var POKEMON_DB = [
     attacks:[{name:"Icicle Shard",energy:2,baseDmg:80,desc:"",fx:""},
              {name:"Huge Earthquake",energy:4,baseDmg:100,desc:"30 to ALL bench (both sides)",fx:"allBenchDmg:30"}]},
 
+  {name:"Magneton",types:["Electric","Steel"],cost:4,hp:180,
+    ability:{name:"Super Magnet",desc:"1 mana: steal all of any Pokemon's Held Items",type:"active",key:"superMagnet",targeted:true,activeOnly:true},
+    attacks:[{name:"Electro Blast",energy:3,baseDmg:80,desc:"",fx:""}]},
+
   {name:"Marowak",types:["Ground"],cost:3,hp:200,weakness:["Grass"],resistance:["Electric"],
     attacks:[{name:"Bonemerang",energy:2,baseDmg:50,desc:"100 sustained",fx:"sustained:50"}]},
 
@@ -217,6 +243,10 @@ var POKEMON_DB = [
 
   {name:"Meowth",types:["Normal"],cost:2,hp:130,weakness:[],resistance:["Ghost"],
     attacks:[{name:"Pay Day",energy:2,baseDmg:20,desc:"Gain 1 mana",fx:"gainMana:1"}]},
+
+  {name:"Munchlax",types:["Normal"],cost:3,hp:220,
+    ability:{name:"Recycle",desc:"Attach a Held Item from your discard pile (no item held)",type:"active",key:"recycle"},
+    attacks:[{name:"Full Body Crash",energy:3,baseDmg:100,desc:"Lose 2 energy, fall Asleep",fx:"selfEnergyLoss:2,selfSleep"}]},
 
   {name:"Mew",types:["Psychic"],cost:5,hp:230,weakness:["Ghost"],resistance:["Fighting"],
     ability:{name:"Versatility",desc:"Can use bench allies' attacks",type:"passive",key:"versatility"},
@@ -266,6 +296,10 @@ var POKEMON_DB = [
     attacks:[{name:"Glinting Claw",energy:2,baseDmg:100,desc:"",fx:""},
              {name:"Blue Flare Blaze",energy:4,baseDmg:250,desc:"Lose 2 energy",fx:"selfEnergyLoss:2"}]},
 
+  {name:"Ribombee",types:["Bug","Fairy"],cost:4,hp:170,
+    ability:{name:"Honey Gather",desc:"End of turn: if Active, gain 1 Mana",type:"passive",key:"honeyGather"},
+    attacks:[{name:"Pollen Puff",energy:2,baseDmg:0,desc:"Choose any Pokemon. Opp: 50 dmg. Yours: heal 50",fx:"pollenPuff"}]},
+
   {name:"Rotom",types:["Electric","Ghost"],cost:3,hp:180,
     attacks:[{name:"Trick",energy:1,baseDmg:0,desc:"Both Active Pokemon swap Held Items",fx:"trick"},
              {name:"Poltergeist",energy:3,baseDmg:100,desc:"Does nothing if defender has no Held Item",fx:"poltergeist"}]},
@@ -304,6 +338,10 @@ var POKEMON_DB = [
   {name:"Skarmory",types:["Steel","Flying"],cost:4,hp:260,weakness:["Fighting","Ice"],resistance:["Poison","Ground"],
     attacks:[{name:"Steel Wing",energy:1,baseDmg:50,desc:"",fx:""},
              {name:"Brave Bird",energy:3,baseDmg:130,desc:"50 to self",fx:"selfDmg:50"}]},
+
+  {name:"Skuntank",types:["Poison","Dark"],cost:4,hp:200,
+    ability:{name:"Aftermath",desc:"If Active and KO'd, deal 100 to opp Active",type:"passive",key:"aftermath"},
+    attacks:[{name:"Stench Blast",energy:3,baseDmg:50,desc:"Opp loses 1 Mana",fx:"oppMana:-1"}]},
 
   {name:"Slurpuff",types:["Fairy"],cost:4,hp:230,weakness:["Steel"],resistance:["Dragon"],
     ability:{name:"Yummy Delivery",desc:"Bench +1 energy free/turn",type:"active",key:"yummyDelivery",targeted:true,activeOnly:true},

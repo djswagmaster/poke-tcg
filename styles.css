@@ -210,6 +210,23 @@ button { cursor:pointer; font-family:inherit; }
 .ap-hand-card .hc-name { font-size:13px; font-weight:700; color:#bbb; }
 .ap-hand-card .hc-cost { font-size:11px; color:#38bdf8; }
 .ap-hand-card.cant-afford { opacity:0.35; pointer-events:none; }
+.ap-discard-card { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; cursor:pointer; margin-bottom:4px; opacity:0.5; transition:all 0.15s; border:1px solid rgba(255,255,255,0.04); }
+.ap-discard-card:hover { opacity:0.8; background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.08); }
+.ap-discard-card img { width:40px; border-radius:4px; filter:grayscale(0.5); }
+.ap-discard-card .hc-name { font-size:11px; font-weight:600; color:#888; }
+.ap-recycle-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; cursor:pointer; border:1px solid rgba(245,158,11,0.3); background:rgba(245,158,11,0.08); transition:all 0.15s; }
+.ap-recycle-item:hover { background:rgba(245,158,11,0.2); border-color:rgba(245,158,11,0.6); transform:translateY(-1px); }
+.ap-recycle-item img { width:48px; border-radius:5px; }
+.ap-recycle-item span { font-size:12px; font-weight:700; color:#f59e0b; }
+.ap-resurrect-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; cursor:pointer; border:1px solid rgba(251,191,36,0.3); background:rgba(251,191,36,0.08); transition:all 0.15s; }
+.ap-resurrect-item:hover { background:rgba(251,191,36,0.2); border-color:rgba(251,191,36,0.6); transform:translateY(-1px); }
+.ap-resurrect-item img { width:48px; border-radius:5px; }
+.ap-resurrect-item span { font-size:12px; font-weight:700; color:#fbbf24; }
+.ap-resurrect-item .resurrect-cost { font-size:10px; color:#a78bfa; }
+.ap-ko-card { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; cursor:pointer; margin-bottom:4px; opacity:0.4; transition:all 0.15s; border:1px solid rgba(239,68,68,0.1); }
+.ap-ko-card:hover { opacity:0.7; background:rgba(239,68,68,0.05); }
+.ap-ko-card img { width:40px; border-radius:4px; filter:grayscale(0.7); }
+.ap-ko-card .hc-name { font-size:11px; font-weight:600; color:#777; }
 .hc-view-btn { margin-left:auto; background:rgba(129,140,248,0.2); color:#c7d2fe; border:1px solid rgba(129,140,248,0.35); border-radius:6px; font-size:10px; font-weight:700; padding:4px 6px; cursor:pointer; }
 .setup-view-btn { margin-top:4px; background:rgba(129,140,248,0.2); color:#c7d2fe; border:1px solid rgba(129,140,248,0.35); border-radius:6px; font-size:10px; font-weight:700; padding:3px 6px; cursor:pointer; }
 
@@ -583,10 +600,14 @@ button { cursor:pointer; font-family:inherit; }
   .mana-icon { font-size:20px; }
   .mana-current { font-size:20px; }
   .mana-max { font-size:11px; }
+  /* Hide poke-mana overlay on mobile - it covers the active Pokemon */
+  .poke-mana-display { display:none; }
 
   /* Hand cards compact */
   .ap-hand-card img { width:48px; }
   .ap-hand-card { padding:6px; margin-bottom:4px; }
+  .ap-discard-card img { width:32px; }
+  .ap-discard-card { padding:4px 6px; margin-bottom:2px; }
 
   /* Deck build */
   .db-sidebar { width:180px; }

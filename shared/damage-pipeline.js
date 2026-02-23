@@ -40,6 +40,59 @@ function getHeldItems(pk) {
   return [];
 }
 
+// Remove a specific held item from a Pokemon, updating both heldItem and heldItems.
+function removeHeldItem(pk, itemName) {
+  if (pk.heldItems && pk.heldItems.length > 0) {
+    var idx = pk.heldItems.indexOf(itemName);
+    if (idx !== -1) pk.heldItems.splice(idx, 1);
+    pk.heldItem = pk.heldItems.length > 0 ? pk.heldItems[0] : null;
+  } else {
+    if (pk.heldItem === itemName) pk.heldItem = null;
+  }
+}
+
+// Track a discarded held item in the owning player's discard pile.
+function trackDiscard(G, pk, itemName) {
+  if (!G || !itemName) return;
+  for (var pNum = 1; pNum <= 2; pNum++) {
+    var player = G.players[pNum];
+    if (!player.discardPile) player.discardPile = [];
+    if (player.active === pk) { player.discardPile.push(itemName); return; }
+    for (var i = 0; i < player.bench.length; i++) {
+      if (player.bench[i] === pk) { player.discardPile.push(itemName); return; }
+    }
+  }
+}
+
+// Centralized energy loss with White Herb check.
+// Returns { actual: number, events: [] }
+function loseEnergy(G, pk, amount) {
+  _deps();
+  var events = [];
+  if (!pk || amount <= 0) return { actual: 0, events: events };
+  var actual = Math.min(amount, pk.energy);
+  if (actual <= 0) return { actual: 0, events: events };
+
+  // White Herb check
+  var items = getHeldItems(pk);
+  if (items.indexOf('White Herb') !== -1 && !pk.heldItemUsed) {
+    var whResult = ItemDB.runItemHook('onEnergyLoss', 'White Herb', { holder: pk, amount: actual });
+    if (whResult) {
+      var prevented = whResult.prevented || 0;
+      actual = Math.max(0, actual - prevented);
+      if (whResult.discard) {
+        pk.heldItemUsed = true;
+        removeHeldItem(pk, 'White Herb');
+        trackDiscard(G, pk, 'White Herb');
+      }
+      events.push({ type: 'itemProc', item: 'White Herb', pokemon: pk.name, effect: 'preventEnergyLoss', prevented: prevented });
+    }
+  }
+
+  pk.energy = Math.max(0, pk.energy - actual);
+  return { actual: actual, events: events };
+}
+
 // Run an item hook across ALL held items (for multi-item Pokemon like Klefki).
 // Returns the combined/merged result, or null if no hooks fired.
 function runItemHookAll(hookName, pk, ctx) {
@@ -183,6 +236,7 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
     var myBench = G.players[currentPlayer].bench;
     baseDmg += fxVal * myBench.length;
   }
+  if (fx.indexOf('scaleCost:') !== -1) { fxVal = parseInt(fx.split('scaleCost:')[1]); var defData = PokemonDB.getPokemonData(defender.name); baseDmg += fxVal * (defData ? defData.cost : 0); }
   if (fx.indexOf('sustained:') !== -1 && attacker.sustained) { baseDmg += parseInt(fx.split('sustained:')[1]); }
   if (fx.indexOf('berserk') !== -1) { baseDmg += attacker.damage; }
   if (fx.indexOf('bonusDmg:') !== -1) { var bdParts = fx.split('bonusDmg:')[1].split(':'); if (defender.damage >= parseInt(bdParts[0])) baseDmg += parseInt(bdParts[1]); }
@@ -190,6 +244,10 @@ function calcDamage(G, attacker, defender, attack, attackerTypes, defenderOwner)
   if (fx.indexOf('payback:') !== -1) { fxVal = parseInt(fx.split('payback:')[1]); if (attacker.damage >= 100) baseDmg += fxVal; }
   if (fx.indexOf('maxEnergyBonus:') !== -1) { fxVal = parseInt(fx.split('maxEnergyBonus:')[1]); if (attacker.energy >= Constants.MAX_ENERGY) baseDmg += fxVal; }
   if (fx.indexOf('scaleDefNeg:') !== -1) { fxVal = parseInt(fx.split('scaleDefNeg:')[1]); baseDmg -= fxVal * defender.energy; baseDmg = Math.max(0, baseDmg); }
+  if (fx.indexOf('trashHeap') !== -1) {
+    var myDiscard = G.players[currentPlayer].discardPile || [];
+    baseDmg += 10 * myDiscard.length;
+  }
 
   if (baseDmg <= 0) return { damage: 0, mult: 1, luckyProc: false, reduction: 0 };
 
@@ -314,11 +372,8 @@ function applyDamage(G, pokemon, amount, ownerPlayerNum) {
         });
         if (lethalResult.discard) {
           pokemon.heldItemUsed = true;
-          if (pokemon.heldItem === allItemsLethal[li]) pokemon.heldItem = null;
-          if (pokemon.heldItems) {
-            var lIdx = pokemon.heldItems.indexOf(allItemsLethal[li]);
-            if (lIdx !== -1) pokemon.heldItems.splice(lIdx, 1);
-          }
+          removeHeldItem(pokemon, allItemsLethal[li]);
+          trackDiscard(G, pokemon, allItemsLethal[li]);
         }
         return { ko: false, events: events };
       }
@@ -341,11 +396,8 @@ function applyDamage(G, pokemon, amount, ownerPlayerNum) {
         });
         if (dmgResult.discard) {
           pokemon.heldItemUsed = true;
-          if (pokemon.heldItem === allItemsDmg[di]) pokemon.heldItem = null;
-          if (pokemon.heldItems) {
-            var dIdx = pokemon.heldItems.indexOf(allItemsDmg[di]);
-            if (dIdx !== -1) pokemon.heldItems.splice(dIdx, 1);
-          }
+          removeHeldItem(pokemon, allItemsDmg[di]);
+          trackDiscard(G, pokemon, allItemsDmg[di]);
         }
       }
     }
@@ -396,6 +448,19 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
     if (selPk === pokemon) G.selectedCard = null;
   }
 
+  // Send held items to owner's discard pile on KO
+  var allItemsOnKO = getHeldItems(pokemon);
+  if (allItemsOnKO.length > 0) {
+    if (!owner.discardPile) owner.discardPile = [];
+    for (var di = 0; di < allItemsOnKO.length; di++) {
+      owner.discardPile.push(allItemsOnKO[di]);
+    }
+  }
+
+  // Track KO'd Pokemon in koPool (for Radiant Resurrection etc.)
+  if (!owner.koPool) owner.koPool = [];
+  owner.koPool.push(pokemon.name);
+
   // Item onKO hook (Rescue Scarf: return to hand, Exp. Share: transfer energy)
   var koItemResult = null;
   var allItemsKO = getHeldItems(pokemon);
@@ -411,7 +476,18 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
       }}
       if (koRes.returnToHand) {
         owner.hand.push({ name: pokemon.name, type: 'pokemon', heldItem: null });
+        // Remove from koPool since it returned to hand
+        var kpIdx = owner.koPool.indexOf(pokemon.name);
+        if (kpIdx !== -1) owner.koPool.splice(kpIdx, 1);
         events.push({ type: 'itemProc', item: allItemsKO[ki], pokemon: pokemon.name, effect: 'returnToHand' });
+      }
+      if (koRes.manaGain) {
+        var leggResult = gainMana(G, ownerPlayerNum, koRes.manaGain);
+        if (leggResult.gained > 0) {
+          events.push({ type: 'itemProc', item: allItemsKO[ki], pokemon: pokemon.name, effect: 'manaGain', amount: leggResult.gained });
+          events.push({ type: 'mana_gain', player: ownerPlayerNum, amount: leggResult.gained });
+          for (var lei = 0; lei < leggResult.events.length; lei++) events.push(leggResult.events[lei]);
+        }
       }
     }
   }
@@ -419,12 +495,24 @@ function handleKO(G, pokemon, ownerPlayerNum, options) {
   // Azurill: Bouncy Generator (active KO grants 1 mana)
   var ownerActiveData = PokemonDB.getPokemonData(pokemon.name);
   if (owner.active === pokemon && ownerActiveData.ability && ownerActiveData.ability.key === 'bouncyGenerator' && !isPassiveBlocked(G, pokemon)) {
-    var prevMana = owner.mana;
-    owner.mana = Math.min(Constants.MAX_MANA, owner.mana + 1);
-    var gained = owner.mana - prevMana;
-    if (gained > 0) {
-      events.push({ type: 'ability_effect', ability: 'bouncyGenerator', pokemon: pokemon.name, player: ownerPlayerNum, amount: gained });
-      events.push({ type: 'mana_gain', player: ownerPlayerNum, amount: gained });
+    var manaResult = gainMana(G, ownerPlayerNum, 1);
+    if (manaResult.gained > 0) {
+      events.push({ type: 'ability_effect', ability: 'bouncyGenerator', pokemon: pokemon.name, player: ownerPlayerNum, amount: manaResult.gained });
+      events.push({ type: 'mana_gain', player: ownerPlayerNum, amount: manaResult.gained });
+      for (var bgi = 0; bgi < manaResult.events.length; bgi++) events.push(manaResult.events[bgi]);
+    }
+  }
+
+  // Skuntank: Aftermath (active KO deals 100 to opp active)
+  if (koIsActive && ownerActiveData.ability && ownerActiveData.ability.key === 'aftermath' && !isPassiveBlocked(G, pokemon)) {
+    var oppActive = scorer.active;
+    if (oppActive && oppActive.hp > 0) {
+      var amResult = applyDamage(G, oppActive, 100, ownerPlayerNum);
+      events.push({ type: 'ability_damage', ability: 'aftermath', target: oppActive.name, amount: 100, owner: ownerPlayerNum });
+      if (amResult.ko) {
+        var amKoEvents = handleKO(G, oppActive, scorerNum);
+        events = events.concat(amKoEvents);
+      }
     }
   }
 
@@ -540,11 +628,8 @@ function runReactiveItems(G, attacker, defender, attackResult, attackerOwner, de
       }
       if (wpResult.discard) {
         defender.heldItemUsed = true;
-        if (defender.heldItem === riName) defender.heldItem = null;
-        if (defender.heldItems) {
-          var rIdx = defender.heldItems.indexOf(riName);
-          if (rIdx !== -1) defender.heldItems.splice(rIdx, 1);
-        }
+        removeHeldItem(defender, riName);
+        trackDiscard(G, defender, riName);
       }
     }
   }
@@ -648,11 +733,12 @@ function dealAttackDamage(G, attacker, defender, attack, attackerTypes, defender
           }
         }
         if (atkResult.energyLoss) {
-          var beforeEnergy = attacker.energy;
-          attacker.energy = Math.max(0, attacker.energy - atkResult.energyLoss);
-          var lost = beforeEnergy - attacker.energy;
-          if (lost > 0) {
-            events.push({ type: 'energyLoss', pokemon: attacker.name, amount: lost, source: atkItems[0], owner: attackerOwner });
+          var leResult = loseEnergy(G, attacker, atkResult.energyLoss);
+          if (leResult.actual > 0) {
+            events.push({ type: 'energyLoss', pokemon: attacker.name, amount: leResult.actual, source: atkItems[0], owner: attackerOwner });
+          }
+          for (var lei = 0; lei < leResult.events.length; lei++) {
+            events.push(leResult.events[lei]);
           }
         }
         if (atkResult.lockAttackName) {
@@ -695,6 +781,38 @@ function dealStatusDamage(G, pokemon, amount, ownerPlayerNum, statusType) {
 }
 
 // ============================================================
+// CENTRALIZED MANA GAIN
+// ============================================================
+// All mana gains should go through this helper so passive triggers
+// (like Cresselia's Blessing) fire automatically.
+function gainMana(G, playerNum, amount) {
+  _deps();
+  var player = G.players[playerNum];
+  if (!player || amount <= 0) return { gained: 0, events: [] };
+  var before = player.mana;
+  player.mana = Math.min(Constants.MAX_MANA, player.mana + amount);
+  var gained = player.mana - before;
+  var events = [];
+  if (gained <= 0) return { gained: 0, events: events };
+
+  // Blessing: Cresselia heals 10 per mana gained
+  var allPk = [player.active].concat(player.bench).filter(Boolean);
+  for (var i = 0; i < allPk.length; i++) {
+    var pk = allPk[i];
+    if (pk.hp <= 0 || pk.damage <= 0) continue;
+    var d = PokemonDB.getPokemonData(pk.name);
+    if (d && d.ability && d.ability.key === 'blessing' && d.ability.type === 'passive' && !isPassiveBlocked(G, pk)) {
+      var healAmt = 10 * gained;
+      pk.damage = Math.max(0, pk.damage - healAmt);
+      pk.hp = pk.maxHp - pk.damage;
+      events.push({ type: 'ability_heal', ability: 'blessing', pokemon: pk.name, amount: healAmt, owner: playerNum });
+    }
+  }
+
+  return { gained: gained, events: events };
+}
+
+// ============================================================
 // EXPORTS
 // ============================================================
 exports.calcWeaknessResistance = calcWeaknessResistance;
@@ -707,6 +825,10 @@ exports.runReactiveItems = runReactiveItems;
 exports.dealAttackDamage = dealAttackDamage;
 exports.dealStatusDamage = dealStatusDamage;
 exports.getHeldItems = getHeldItems;
+exports.removeHeldItem = removeHeldItem;
+exports.trackDiscard = trackDiscard;
+exports.loseEnergy = loseEnergy;
+exports.gainMana = gainMana;
 exports.runItemHookAll = runItemHookAll;
 
 })(typeof module !== 'undefined' && module.exports ? module.exports : (this.DamagePipeline = {}));
